@@ -26,7 +26,7 @@ A MnK-to-Controller movement remapper for Apex Legends.
 
 ---
 
-## Notes
+## Note
 
 - Run as Admin for key blocking to work.
 - Make sure DS4Windows or other remappers aren't running.
