@@ -20,7 +20,7 @@ namespace Rebind.Views
         {
             InitializeComponent();
             
-            // Reuse single shared instance from App to prevent diverged config state (Fix Bug #2)
+            // Reuse the app's manager so the UI and engine share the same config state.
             _configManager = App.ConfigManager ?? new ConfigManager();
             _config = _configManager.LoadConfig();
             LoadConfigToUI();
@@ -104,7 +104,7 @@ namespace Rebind.Views
 
         private void SuperglideFps_Changed(object sender, TextChangedEventArgs e)
         {
-            // Only save when a valid number is typed to avoid saving on partial input
+            // TextChanged also fires for partial edits, so wait for a valid value.
             if (int.TryParse(txtSuperglideFps.Text, out int fps) && fps >= 30)
             {
                 _config.SuperglideFps = fps;
@@ -134,10 +134,8 @@ namespace Rebind.Views
                 _activeBindButton.Tag = "Active";
                 _activeBindButton.Content = "...";
 
-                // Enable Binding Mode in the engine
                 if (App.KeyMapper != null) App.KeyMapper.IsBindingMode = true;
-                
-                // Ensure focus
+
                 Keyboard.Focus(this);
             }
         }
@@ -162,7 +160,6 @@ namespace Rebind.Views
 
                 Key targetKey = e.Key == Key.System ? e.SystemKey : e.Key;
 
-                // Escape cancels binding mode (Fix Bug #1)
                 if (targetKey == Key.Escape)
                 {
                     CancelBind();
@@ -178,7 +175,6 @@ namespace Rebind.Views
         {
             if (_activeBindButton != null)
             {
-                // Check if user clicked on something other than a bind button or current active button to cancel
                 string? mouseStr = e.ChangedButton switch
                 {
                     MouseButton.Middle   => "Mouse3",
@@ -194,7 +190,6 @@ namespace Rebind.Views
                 }
                 else if (e.OriginalSource is not Button b || b != _activeBindButton)
                 {
-                    // Clicked away with left/right click -> cancel binding mode (Fix Bug #1)
                     CancelBind();
                 }
             }

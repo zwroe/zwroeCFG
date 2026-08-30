@@ -5,10 +5,6 @@ using Rebind.Core.Models;
 
 namespace Rebind.Services
 {
-    /// <summary>
-    /// Manages loading and saving user keybind configurations to disk.
-    /// Serializes and deserializes the MappingConfig class to mappingConfig.json.
-    /// </summary>
     public class ConfigManager
     {
         private const string ConfigFileName = "mappingConfig.json";
@@ -18,10 +14,6 @@ namespace Rebind.Services
         private static readonly string ConfigFilePath = Path.Combine(ConfigDirectory, ConfigFileName);
         private static readonly string LegacyConfigFilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, ConfigFileName);
 
-        /// <summary>
-        /// Loads the configuration from mappingConfig.json.
-        /// If the file does not exist, creates a default configuration and saves it.
-        /// </summary>
         public MappingConfig LoadConfig()
         {
             EnsureConfigDirectory();
@@ -54,9 +46,6 @@ namespace Rebind.Services
             }
         }
 
-        /// <summary>
-        /// Saves the given configuration object to mappingConfig.json as formatted JSON.
-        /// </summary>
         public void SaveConfig(MappingConfig config)
         {
             try

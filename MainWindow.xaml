@@ -52,11 +52,9 @@
                 <RowDefinition Height="*"/>
             </Grid.RowDefinitions>
 
-            <!-- Custom Title Bar -->
             <Border Grid.Row="0" x:Name="TitleBar" Background="Transparent" MouseLeftButtonDown="TitleBar_MouseLeftButtonDown">
                 <Grid>
                     <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="12,0,0,0">
-                        <!-- Status Indicator Dot -->
                         <Ellipse x:Name="StatusDot" Width="8" Height="8" Fill="#00CC66"/>
                         <TextBlock Text="zwroe CFG" Foreground="#888" FontSize="10" FontWeight="Bold" Margin="8,0,0,0" VerticalAlignment="Center"/>
                         <TextBlock x:Name="ViGEmWarningText" Text="⚠️ ViGEm Not Connected" Foreground="#FF4B4B" FontSize="10" FontWeight="Bold" Margin="12,0,0,0" VerticalAlignment="Center" Visibility="Collapsed"/>
@@ -69,7 +67,6 @@
                 </Grid>
             </Border>
 
-            <!-- Main Content Area -->
             <Frame Grid.Row="1" x:Name="MainFrame" NavigationUIVisibility="Hidden"/>
         </Grid>
     </Border>

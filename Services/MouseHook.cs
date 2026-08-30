@@ -4,11 +4,6 @@ using System.Runtime.InteropServices;
 
 namespace Rebind.Services
 {
-    /// <summary>
-    /// Handles low-level mouse button interception via the Windows API.
-    /// Supports Mouse3 (Middle), Mouse4 (XButton1), and Mouse5 (XButton2).
-    /// Fires the same KeyEvent signature as KeyboardHook so the engine can treat them uniformly.
-    /// </summary>
     public class MouseHook : IDisposable
     {
         private const int WH_MOUSE_LL = 14;
@@ -17,14 +12,10 @@ namespace Rebind.Services
         private const int WM_XBUTTONDOWN  = 0x020B;
         private const int WM_XBUTTONUP    = 0x020C;
 
-        public const int VK_MBUTTON  = 0x04; // Mouse3 / Middle
-        public const int VK_XBUTTON1 = 0x05; // Mouse4 / Back side button
-        public const int VK_XBUTTON2 = 0x06; // Mouse5 / Forward side button
+        public const int VK_MBUTTON  = 0x04;
+        public const int VK_XBUTTON1 = 0x05;
+        public const int VK_XBUTTON2 = 0x06;
 
-        /// <summary>
-        /// Event fired when a supported mouse button is pressed or released.
-        /// Return true to block the event from reaching the system.
-        /// </summary>
         public event Func<int, bool, bool>? KeyEvent;
 
         private LowLevelMouseProc _proc;
@@ -69,7 +60,7 @@ namespace Rebind.Services
                 }
                 else if (msg == WM_XBUTTONDOWN || msg == WM_XBUTTONUP)
                 {
-                    // mouseData is at offset 8 in MSLLHOOKSTRUCT; high-word identifies XButton 1 or 2
+                    // mouseData is at offset 8 in MSLLHOOKSTRUCT; the high word identifies XButton 1 or 2.
                     int mouseData = Marshal.ReadInt32(lParam, 8);
                     int xButton   = (mouseData >> 16) & 0xFFFF;
                     vkCode = (xButton == 1) ? VK_XBUTTON1 : VK_XBUTTON2;

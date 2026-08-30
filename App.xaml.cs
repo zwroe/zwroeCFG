@@ -7,10 +7,6 @@ namespace Rebind
     {
         public static KeyMapperService? KeyMapper { get; private set; }
 
-        /// <summary>
-        /// The single shared ConfigManager instance — exposed so the UI page
-        /// does not need to create a second one, preventing diverged state.
-        /// </summary>
         public static ConfigManager? ConfigManager { get; private set; }
 
         protected override void OnStartup(StartupEventArgs e)

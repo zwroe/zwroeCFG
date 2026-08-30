@@ -35,11 +35,6 @@ namespace Rebind.Services
         }
     }
 
-    /// <summary>
-    /// The core engine of the remapper.
-    /// Handles listening to physical keystrokes, executing the high-precision macro loop,
-    /// and routing simulated inputs to the virtual controller via ViGEm.
-    /// </summary>
     public class KeyMapperService : IDisposable
     {
         [DllImport("winmm.dll")]
@@ -50,8 +45,7 @@ namespace Rebind.Services
         [DllImport("user32.dll")]
         private static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, uint dwExtraInfo);
 
-        // High-resolution waitable timer (Windows 10 1803+)
-        // Provides sub-millisecond precision at near-zero CPU cost
+        // High-resolution waitable timers are available on Windows 10 1803 and later.
         [DllImport("kernel32.dll", SetLastError = true)]
         private static extern IntPtr CreateWaitableTimerEx(IntPtr attrs, IntPtr name, uint flags, uint access);
         [DllImport("kernel32.dll", SetLastError = true)]
@@ -71,20 +65,18 @@ namespace Rebind.Services
         private const byte SCAN_E = 0x12;
         private const byte SCAN_SPACE = 0x39;
         private const byte VK_N = 0x4E;
-        private const byte SCAN_N = 0x31; // Inspect key
+        private const byte SCAN_N = 0x31;
 
-        // In-game movement keybind scan codes (dynamic, resolved from config)
-        private byte _scanForward = 0x17;  // Default I
-        private byte _scanBackward = 0x25; // Default K
-        private byte _scanLeft = 0x24;     // Default J
-        private byte _scanRight = 0x26;    // Default L
-        private byte _scanJump = 0x15;     // Default Y
+        private byte _scanForward = 0x17;
+        private byte _scanBackward = 0x25;
+        private byte _scanLeft = 0x24;
+        private byte _scanRight = 0x26;
+        private byte _scanJump = 0x15;
 
-        // Primary WASD scan codes - used to synthesize keyboard events after tap-strafe
-        private byte _scanCodeW = 0x11;    // W
-        private byte _scanCodeS = 0x1F;    // S
-        private byte _scanCodeA = 0x1E;    // A
-        private byte _scanCodeD = 0x20;    // D
+        private byte _scanCodeW = 0x11;
+        private byte _scanCodeS = 0x1F;
+        private byte _scanCodeA = 0x1E;
+        private byte _scanCodeD = 0x20;
 
         private readonly KeyboardHook _keyboardHook;
         private readonly MouseHook _mouseHook;
@@ -94,19 +86,11 @@ namespace Rebind.Services
         private MappingConfig? _config;
         private bool _isEnabled = true;
 
-        /// <summary>
-        /// Indicates if the remapper engine is currently active.
-        /// </summary>
         public bool IsEnabled => _isEnabled;
 
-        /// <summary>
-        /// Indicates if ViGEmBus controller is connected.
-        /// </summary>
         public bool IsViGEmConnected => _vigemService.IsConnected;
 
-        /// <summary>
-        /// Set to true by the UI to pause input blocking, allowing the user to bind new keys.
-        /// </summary>
+        // Binding mode lets the UI capture a key without the hook blocking it.
         public bool IsBindingMode { get; set; } = false;
 
         private int _toggleKeyVk;
@@ -135,7 +119,7 @@ namespace Rebind.Services
         private int _macroCounter = 0;
         private int _tapStrafeCounter = 0;
         private readonly Stopwatch _loopTimer = Stopwatch.StartNew();
-        private readonly IntPtr _hrTimer; // high-resolution waitable timer handle (INVALID_HANDLE_VALUE if unsupported)
+        private readonly IntPtr _hrTimer;
         private bool _jumpState = false;
         private bool _lootState = false;
         private bool _isLootKeyPressed = false;
@@ -148,8 +132,7 @@ namespace Rebind.Services
         private List<int> _verticalStack = new List<int>();
 
         private bool _wasTapStrafeActive = false;
-        // VK codes of physical WASD keys that have a synthetic KEYDOWN currently active in Apex.
-        // When the physical key is released, we send the matching synthetic KEYUP so the key never sticks.
+        // Track synthetic holds so every physical release gets a matching KEYUP.
         private readonly HashSet<int> _syntheticActiveVks = new HashSet<int>();
 
         private short _lastLoggedJoyX = 0;
@@ -159,9 +142,6 @@ namespace Rebind.Services
 
         public event Action<bool>? OnToggleChanged;
 
-        /// <summary>
-        /// Initializes the KeyMapperService and starts the high-precision background macro loop.
-        /// </summary>
         public KeyMapperService(ConfigManager configManager, KeyboardHook keyboardHook, MouseHook mouseHook, ViGEmService vigemService)
         {
             _configManager = configManager;
@@ -172,20 +152,17 @@ namespace Rebind.Services
 
             timeBeginPeriod(1);
 
-            // Try to create a high-resolution waitable timer (Windows 10 1803+).
-            // If this succeeds, the macro loop will sleep via hardware timer instead of spinning,
-            // giving identical timing precision at near-zero CPU cost.
+            // Prefer a Windows high-resolution timer so the 3 ms loop can sleep without losing precision.
             _hrTimer = CreateWaitableTimerEx(IntPtr.Zero, IntPtr.Zero,
                 CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
 
-            // Elevate process priority so Windows doesn't throttle the macro loop when
-            // the app is in the background (e.g. game window is focused).
+            // Keep the timing loop from being deprioritized while the game has focus.
             try
             {
                 System.Diagnostics.Process.GetCurrentProcess().PriorityClass =
                     System.Diagnostics.ProcessPriorityClass.High;
             }
-            catch { /* silently ignore if running without sufficient privileges */ }
+            catch { }
 
             _macroThread = new Thread(MacroLoop) { IsBackground = true, Priority = ThreadPriority.Highest };
             _macroThread.Start();
@@ -196,10 +173,6 @@ namespace Rebind.Services
             _mouseHook.KeyEvent += HandleKeyEvent;
         }
 
-        /// <summary>
-        /// Reloads the mapping configuration from the disk and rebuilds the virtual keycode cache.
-        /// Can be called at runtime to apply new settings without restarting the engine.
-        /// </summary>
         public void ReloadConfig()
         {
             ClearVirtualInputs();
@@ -213,14 +186,12 @@ namespace Rebind.Services
             _backVk = KeyHelper.GetVirtualKeyCode(_config.JoystickYNegative ?? "S");
             _tapStrafeTriggerVk = KeyHelper.GetVirtualKeyCode(_config.TapStrafeKey ?? _config.LeftBumper ?? "Space");
 
-            // Resolve dynamic scan codes for tap strafe output keys
             _scanForward  = KeyHelper.GetScanCode(_config.TapStrafeForward  ?? "I", 0x17);
             _scanBackward = KeyHelper.GetScanCode(_config.TapStrafeBackward ?? "K", 0x25);
             _scanLeft     = KeyHelper.GetScanCode(_config.TapStrafeLeft     ?? "J", 0x24);
             _scanRight    = KeyHelper.GetScanCode(_config.TapStrafeRight    ?? "L", 0x26);
             _scanJump     = KeyHelper.GetScanCode(_config.TapStrafeJump     ?? "Y", 0x15);
 
-            // Resolve WASD scan codes for post-tap-strafe synthetic keyboard events
             _scanCodeW = KeyHelper.GetScanCode(_config.JoystickYPositive ?? "W", 0x11);
             _scanCodeS = KeyHelper.GetScanCode(_config.JoystickYNegative ?? "S", 0x1F);
             _scanCodeA = KeyHelper.GetScanCode(_config.JoystickXNegative ?? "A", 0x1E);
@@ -258,10 +229,6 @@ namespace Rebind.Services
             }
         }
 
-        /// <summary>
-        /// The primary intercept handler. Decides whether to block a physical key press
-        /// and trigger the corresponding controller logic (SnapTap, Jump, etc.).
-        /// </summary>
         private bool HandleKeyEvent(int vkCode, bool isDown)
         {
             if (IsBindingMode) return false;
@@ -273,49 +240,45 @@ namespace Rebind.Services
                 if (!_isEnabled) ClearVirtualInputs();
 
                 OnToggleChanged?.Invoke(_isEnabled);
-                return true; // Block Insert key
+                return true;
             }
 
             if (!_isEnabled || _config == null) return false;
 
-            // Superglide: Crouch immediately, then Jump after exactly 1 game frame.
-            // Frame duration is calculated from the user's configured FPS.
+            // Superglide needs crouch and jump separated by one configured frame.
             if (vkCode == _superglideKeyVk)
             {
                 if (isDown)
                 {
                     KeyLogger.Log($"SUPERGLIDE: Start - FPS={_config.SuperglideFps}");
-                    _vigemService.SetButton(Xbox360Button.Down, true);  // Crouch
+                    _vigemService.SetButton(Xbox360Button.Down, true);
 
                     int fps = Math.Max(30, _config.SuperglideFps);
-                    long frameTicks = Stopwatch.Frequency / fps; // 1 frame in ticks
+                    long frameTicks = Stopwatch.Frequency / fps;
 
-                    // Fire jump on a background thread after exactly 1 frame
                     Task.Run(() =>
                     {
                         long target = _loopTimer.ElapsedTicks + frameTicks;
-                        // Spin-wait for the frame window (same precision as the macro loop)
-                        Thread.Sleep((int)(1000.0 / fps * 0.8)); // sleep 80% of frame
+                        // Sleep through most of the frame, then spin for the precise edge.
+                        Thread.Sleep((int)(1000.0 / fps * 0.8));
                         while (_loopTimer.ElapsedTicks < target) { /* spin */ }
 
-                        // Release crouch and fire jump simultaneously
                         _vigemService.SetButton(Xbox360Button.Down, false);
                         SendScanCode(_scanJump, true);
-                        Thread.Sleep(16); // hold jump for ~1 frame
+                        Thread.Sleep(16);
                         SendScanCode(_scanJump, false);
                         KeyLogger.Log("SUPERGLIDE: Jump fired");
                     });
                 }
-                // Crouch release is handled inside the Task above; block the physical key
+                // The task owns the crouch release, so both physical events stay blocked.
                 return true;
             }
 
-            // SnapTap (A/D)
             if (vkCode == _moveLeftVk || vkCode == _moveRightVk)
             {
                 KeyLogger.Log($"PHYSICAL: {(isDown ? "DOWN" : "UP")} - VK: {vkCode}");
                 UpdateSnapTap(vkCode, isDown);
-                // On KEYUP, also release any synthetic KEYDOWN we issued for this key after tap-strafe
+                // Pair tap-strafe's synthetic hold with the physical release so the key cannot stick.
                 if (!isDown && _syntheticActiveVks.Contains(vkCode))
                 {
                     _syntheticActiveVks.Remove(vkCode);
@@ -323,13 +286,12 @@ namespace Rebind.Services
                     keybd_event(0, sc, KEYEVENTF_SCANCODE | (uint)KEYEVENTF_KEYUP, KeyboardHook.SYNTHETIC_MARKER);
                     KeyLogger.Log($"SYNTHETIC KEYUP: VK={vkCode} Scan=0x{sc:X2}");
                 }
-                return true; // Always block physical A/D
+                return true;
             }
 
-            // Dedicated Tap Strafe Trigger Key (if rebound to a different key than Jump)
             if (vkCode == _tapStrafeTriggerVk && _tapStrafeTriggerVk != _jumpKeyVk)
             {
-                if (isDown && _isTapStrafeTriggerPressed) return true; // Ignore auto-repeat
+                if (isDown && _isTapStrafeTriggerPressed) return true;
                 KeyLogger.Log($"PHYSICAL TAP STRAFE KEY: {(isDown ? "DOWN" : "UP")} - VK: {vkCode}");
                 _isTapStrafeTriggerPressed = isDown;
 
@@ -340,13 +302,12 @@ namespace Rebind.Services
                 }
 
                 UpdateMovementOutput();
-                return true; // Block physical key
+                return true;
             }
 
-            // Jump (Space)
             if (vkCode == _jumpKeyVk)
             {
-                // Ignore physical keyboard auto-repeat when Space is already held down
+                // Repeated keydown events would retrigger the tap while the key is held.
                 if (isDown && _isJumpKeyPressed)
                 {
                     return true;
@@ -381,7 +342,6 @@ namespace Rebind.Services
                 {
                     if (isDown)
                     {
-                        // Single jump tap when Auto-Jump is disabled
                         _vigemService.SetButton(Xbox360Button.LeftShoulder, true);
                         SendScanCode(SCAN_SPACE, true);
 
@@ -400,10 +360,9 @@ namespace Rebind.Services
                 }
 
                 UpdateMovementOutput();
-                return true; // Block physical Space
+                return true;
             }
 
-            // Forward (W)
             if (vkCode == _strafeKeyVk)
             {
                 KeyLogger.Log($"PHYSICAL: {(isDown ? "DOWN" : "UP")} - VK: {vkCode}");
@@ -415,10 +374,9 @@ namespace Rebind.Services
                     keybd_event(0, _scanCodeW, KEYEVENTF_SCANCODE | (uint)KEYEVENTF_KEYUP, KeyboardHook.SYNTHETIC_MARKER);
                     KeyLogger.Log($"SYNTHETIC KEYUP: W VK={vkCode}");
                 }
-                return true; // Always block physical W
+                return true;
             }
 
-            // Backward (S)
             if (vkCode == _backVk)
             {
                 KeyLogger.Log($"PHYSICAL: {(isDown ? "DOWN" : "UP")} - VK: {vkCode}");
@@ -430,7 +388,7 @@ namespace Rebind.Services
                     keybd_event(0, _scanCodeS, KEYEVENTF_SCANCODE | (uint)KEYEVENTF_KEYUP, KeyboardHook.SYNTHETIC_MARKER);
                     KeyLogger.Log($"SYNTHETIC KEYUP: S VK={vkCode}");
                 }
-                return true; // Always block physical S
+                return true;
             }
 
             Action<bool>? action = null;
@@ -442,16 +400,12 @@ namespace Rebind.Services
             if (action != null)
             {
                 action.Invoke(isDown);
-                return true; // Block other mapped keys
+                return true;
             }
 
             return false;
         }
 
-        /// <summary>
-        /// Implements SnapTap (SOCD) logic. Resolves overlapping Left/Right inputs
-        /// by strictly prioritizing the most recently pressed key, ensuring no momentum loss.
-        /// </summary>
         private void UpdateSnapTap(int vkCode, bool isDown)
         {
             lock (_stackLock)
@@ -505,10 +459,8 @@ namespace Rebind.Services
             short rawY = (short)(ew ? 32767 : (es ? -32768 : 0));
             short rawX = (short)(ed ? 32767 : (ea ? -32768 : 0));
 
-            // Micro-dither active non-zero axes by 1 unit on alternating macro ticks.
-            // In hybrid input games like Apex Legends, static controller axes are put to sleep
-            // when KBM events occur (mouse click, crouch, tap-strafe). Micro-dithering keeps
-            // the XInput driver report stream active so movement NEVER stops or freezes.
+            // Apex can stop reporting a static controller axis after keyboard or mouse input.
+            // Alternating by one unit keeps XInput movement active.
             short dither = (short)((_macroCounter % 2 == 0) ? 0 : 1);
             _currentJoyY = rawY == 0 ? (short)0 : (short)(rawY > 0 ? rawY - dither : rawY + dither);
             _currentJoyX = rawX == 0 ? (short)0 : (short)(rawX > 0 ? rawX - dither : rawX + dither);
@@ -520,7 +472,6 @@ namespace Rebind.Services
                 KeyLogger.Log($"VIRTUAL INPUTS: JoyX={_currentJoyX} (raw={rawX}), JoyY={_currentJoyY} (raw={rawY}) | WASD=[W:{ew}, A:{ea}, S:{es}, D:{ed}] (forceRefresh={forceRefresh})");
             }
 
-            // Update Virtual Xbox Controller Left Thumbstick with micro-dithered axis values
             _vigemService.SetAxis(Xbox360Axis.LeftThumbX, _currentJoyX);
             _vigemService.SetAxis(Xbox360Axis.LeftThumbY, _currentJoyY);
         }
@@ -531,7 +482,6 @@ namespace Rebind.Services
             {
                 if (!_scanCodeStates.ContainsKey(scanCode)) _scanCodeStates[scanCode] = false;
                 
-                // Skip redundant hardware calls
                 if (_scanCodeStates[scanCode] == isDown) return;
             }
             
@@ -559,7 +509,6 @@ namespace Rebind.Services
             _currentJoyX = 0;
             _currentJoyY = 0;
 
-            // Release all virtual in-game keys
             SendScanCode(_scanForward, false);
             SendScanCode(_scanBackward, false);
             SendScanCode(_scanLeft, false);
@@ -581,10 +530,6 @@ namespace Rebind.Services
             _isInspectKeyPressed = false;
         }
 
-        /// <summary>
-        /// A high-priority background loop running at 3ms intervals.
-        /// Executes tap-strafe pulsing, optional auto jump, and fast-loot helpers.
-        /// </summary>
         private void MacroLoop()
         {
             while (_isRunning)
@@ -593,9 +538,7 @@ namespace Rebind.Services
                 {
                     _macroCounter++;
 
-                    // CONTINUOUS MOVEMENT RE-ASSERTION (Every 5 ticks = 15ms)
-                    // Whenever movement keys are held in stack, continuously refresh the controller stick
-                    // with micro-dithering so mouse clicks, crouch, and tap-strafe scan-codes never freeze movement.
+                    // Refresh held movement every 15 ms because hybrid-input events can stall a static stick report.
                     bool hasMovementKeys;
                     lock (_stackLock)
                     {
@@ -607,25 +550,17 @@ namespace Rebind.Services
                         UpdateMovementOutput();
                     }
 
-                    // ── Tap Strafe Engine ──────────────────────────────────────────
-                    // Rules:
-                    //   Space + W  → spam _scanJump + _scanForward
-                    //   Space + S  → spam _scanJump + _scanBackward
-                    //   Space + A  → spam _scanJump + _scanLeft
-                    //   Space + D  → spam _scanJump + _scanRight
                     if (IsMacroActive())
                     {
                         if (!_wasTapStrafeActive)
                         {
-                            // We just started tap-strafing. Reset the local counter so we immediately 
-                            // send an ON pulse, eliminating any startup delay.
+                            // Start with an ON pulse instead of waiting for the previous counter phase.
                             _tapStrafeCounter = 0;
                             _wasTapStrafeActive = true;
                         }
 
                         _tapStrafeCounter++;
 
-                        // Thread-safe stack snapshot
                         bool holdW, holdS, holdA, holdD;
                         lock (_stackLock)
                         {
@@ -635,18 +570,17 @@ namespace Rebind.Services
                             holdD = _horizontalStack.Count > 0 && _horizontalStack[_horizontalStack.Count - 1] == _moveRightVk;
                         }
 
-                        // Log state every 100 ticks (~300ms)
                         if (_macroCounter % 100 == 0)
                             KeyLogger.Log($"STRAFE STATE: W={holdW} S={holdS} A={holdA} D={holdD} | vStack={_verticalStack.Count} hStack={_horizontalStack.Count}");
 
-                        // Pulse: 9ms ON (3 ticks) / 6ms OFF (2 ticks) = 67Hz jump rate.
+                        // The 9 ms on / 6 ms off pulse produces a 67 Hz lurch rate.
                         bool tapOn = (_tapStrafeCounter % 5 < 3);
 
                         if (tapOn)
                         {
                             SendScanCode(_scanJump, true);
 
-                            // Prioritize forward lurch (_scanForward) when W is held.
+                            // Forward takes priority when opposing lurch directions overlap.
                             bool sendI = holdW;
                             bool sendK = holdS && !holdW;
                             bool sendJ = holdA && !holdW && !holdS;
@@ -669,7 +603,6 @@ namespace Rebind.Services
                     }
                     else
                     {
-                        // Clean up when Space released or tap-strafe toggled off
                         if (_wasTapStrafeActive)
                         {
                             _wasTapStrafeActive = false;
@@ -679,7 +612,7 @@ namespace Rebind.Services
                             SendScanCode(_scanLeft, false, force: true);
                             SendScanCode(_scanRight, false, force: true);
 
-                            // Release any synthetic keys cleanly
+                            // End synthetic holds before restoring controller movement.
                             lock (_stackLock)
                             {
                                 foreach (int vk in _syntheticActiveVks)
@@ -694,7 +627,7 @@ namespace Rebind.Services
                                 _syntheticActiveVks.Clear();
                             }
 
-                            // Reset controller stick and re-assert movement output
+                            // Briefly clear the stick to avoid restoring a stale mixed-input state.
                             _vigemService.SetAxis(Xbox360Axis.LeftThumbX, 0);
                             _vigemService.SetAxis(Xbox360Axis.LeftThumbY, 0);
                             Thread.Sleep(10);
@@ -705,7 +638,6 @@ namespace Rebind.Services
 
                         if (_macroCounter % 5 == 0)
                         {
-                            // Normal Jump Spam (when not Tap Strafing)
                             if (_config.IsJumpSpamEnabled && _isJumpKeyPressed)
                             {
                                 _jumpState = !_jumpState;
@@ -717,8 +649,7 @@ namespace Rebind.Services
 
                     }
 
-                    // FAST LOOT SPAM (Keyboard E)
-                    // Every 5 steps (15ms toggle = 30ms cycle = 33Hz)
+                    // Toggle fast loot every 15 ms for a 30 ms key cycle.
                     if (_macroCounter % 5 == 0)
                     {
                         if (_isLootKeyPressed)
@@ -735,8 +666,6 @@ namespace Rebind.Services
 
                     }
 
-                    // INSPECT SPAM (Keyboard N)
-                    // Configurable millisecond delay between key toggles
                     if (_isInspectKeyPressed)
                     {
                         long currentMs = _loopTimer.ElapsedMilliseconds;
@@ -756,18 +685,17 @@ namespace Rebind.Services
                     }
                 }
 
-                // Precise 3ms sleep using hardware waitable timer (near-zero CPU).
-                // Falls back to spin-wait on Windows < 1803 where the timer isn't available.
+                // Older Windows versions fall back to spinning when high-resolution timers are unavailable.
                 if (_hrTimer != IntPtr.Zero && _hrTimer != new IntPtr(-1))
                 {
-                    // Negative value = relative time in 100-nanosecond units. -30000 = 3ms.
+                    // Negative due times are relative 100 ns units; -30000 is 3 ms.
                     long dueTime = -30000L;
                     SetWaitableTimer(_hrTimer, ref dueTime, 0, IntPtr.Zero, IntPtr.Zero, false);
-                    WaitForSingleObject(_hrTimer, 10); // 10ms safety timeout
+                    WaitForSingleObject(_hrTimer, 10);
                 }
                 else
                 {
-                    // Fallback: pure spin-wait (immune to scheduler throttling, uses ~1 CPU core)
+                    // Spinning avoids scheduler jitter here, at the cost of one CPU core.
                     long targetTicks = _loopTimer.ElapsedTicks + (Stopwatch.Frequency * 3 / 1000);
                     while (_loopTimer.ElapsedTicks < targetTicks) { Thread.SpinWait(10); }
                 }

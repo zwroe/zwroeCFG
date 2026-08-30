@@ -4,10 +4,6 @@ using System.Runtime.InteropServices;
 
 namespace Rebind.Services
 {
-    /// <summary>
-    /// Handles low-level keyboard interception via the Windows API.
-    /// This allows the application to capture and block keystrokes before they reach other applications (like games).
-    /// </summary>
     public class KeyboardHook : IDisposable
     {
         private const int WH_KEYBOARD_LL = 13;
@@ -16,24 +12,14 @@ namespace Rebind.Services
         private const int WM_SYSKEYDOWN = 0x0104;
         private const int WM_SYSKEYUP = 0x0105;
 
-        /// <summary>
-        /// Magic marker placed in dwExtraInfo for all keybd_event calls made by this engine.
-        /// The hook uses this to skip synthetic events and avoid re-processing its own output.
-        /// </summary>
+        // Injected events carry this marker so the hook does not process its own output.
         public const uint SYNTHETIC_MARKER = 0x5A57524F; // "ZWRO" in hex
 
         private LowLevelKeyboardProc _proc;
         private IntPtr _hookID = IntPtr.Zero;
 
-        /// <summary>
-        /// Event fired when a key is pressed or released.
-        /// Return true to block the key from reaching the system or other applications.
-        /// </summary>
         public event Func<int, bool, bool>? KeyEvent;
 
-        /// <summary>
-        /// Initializes the keyboard hook and starts intercepting keystrokes.
-        /// </summary>
         public KeyboardHook()
         {
             _proc = HookCallback;
@@ -54,10 +40,6 @@ namespace Rebind.Services
 
         private delegate IntPtr LowLevelKeyboardProc(int nCode, IntPtr wParam, IntPtr lParam);
 
-        /// <summary>
-        /// The callback function that processes intercepted keystrokes.
-        /// Evaluates if the key should be blocked based on the KeyEvent subscribers.
-        /// </summary>
         private IntPtr HookCallback(int nCode, IntPtr wParam, IntPtr lParam)
         {
             if (nCode >= 0)
@@ -68,23 +50,18 @@ namespace Rebind.Services
 
                 if (isDown || isUp)
                 {
-                    // Skip events injected by our own engine to prevent feedback loops
                     uint extraInfo = (uint)Marshal.ReadInt32(lParam, 16);
                     if (extraInfo == SYNTHETIC_MARKER)
                         return CallNextHookEx(_hookID, nCode, wParam, lParam);
 
                     bool handled = KeyEvent?.Invoke(vkCode, isDown) ?? false;
                     
-                    // If handled is true, we return 1 to block the key from Windows/Apex
                     if (handled) return (IntPtr)1;
                 }
             }
             return CallNextHookEx(_hookID, nCode, wParam, lParam);
         }
 
-        /// <summary>
-        /// Removes the hook and cleans up resources.
-        /// </summary>
         public void Dispose()
         {
             UnhookWindowsHookEx(_hookID);

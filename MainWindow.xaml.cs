@@ -15,10 +15,8 @@ namespace Rebind
             
             MainFrame.Navigate(new MappingPageV2());
 
-            // Check ViGEm driver status and display warning if missing (Fix Bug #6)
             CheckViGEmStatus();
 
-            // Subscribe to toggle events from the engine
             if (App.KeyMapper != null)
             {
                 App.KeyMapper.OnToggleChanged += UpdateStatusUI;
@@ -36,7 +34,6 @@ namespace Rebind
 
         private void UpdateStatusUI(bool isEnabled)
         {
-            // Update the dot in the title bar
             this.Dispatcher.Invoke(() => {
                 StatusDot.Fill = new SolidColorBrush(isEnabled ? 
                     (Color)ColorConverter.ConvertFromString("#00CC66") : 

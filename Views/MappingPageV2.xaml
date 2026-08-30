@@ -161,7 +161,6 @@
             </Setter>
         </Style>
 
-        <!-- Custom Dark ScrollBar Style -->
         <Style TargetType="{x:Type ScrollBar}">
             <Setter Property="Stylus.IsPressAndHoldEnabled" Value="False"/>
             <Setter Property="Stylus.IsFlicksEnabled" Value="False"/>
@@ -230,7 +229,6 @@
 
         <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
             <Grid>
-                <!-- Konata Mascot Background (Scrollable) -->
                 <Image Source="/konata2.png" HorizontalAlignment="Right" VerticalAlignment="Bottom" 
                        Height="220" Stretch="Uniform" Margin="0,0,0,-10" IsHitTestVisible="False" Opacity="0.95">
                     <Image.RenderTransform>
@@ -239,7 +237,6 @@
                 </Image>
                 
                 <StackPanel>
-                <!-- FEATURES -->
                 <Border Background="#AA1A1A1A" CornerRadius="8" Padding="12" Margin="0,0,0,12">
                     <StackPanel>
                         <TextBlock Text="MACRO FEATURES" Foreground="#555" FontSize="9" FontWeight="Bold" Margin="0,0,0,10"/>
@@ -254,7 +251,6 @@
                     </StackPanel>
                 </Border>
 
-                <!-- TECHNIQUE BINDINGS -->
                 <Border Background="#AA1A1A1A" CornerRadius="8" Padding="12" Margin="0,0,0,12">
                     <StackPanel>
                         <TextBlock Text="TECHNIQUES" Foreground="#555" FontSize="9" FontWeight="Bold" Margin="0,0,0,12"/>
@@ -305,7 +301,6 @@
                     </StackPanel>
                 </Border>
 
-                <!-- MOVEMENT BINDINGS -->
                 <Border Background="#AA1A1A1A" CornerRadius="8" Padding="12" Margin="0,0,0,12">
                     <StackPanel>
                         <TextBlock Text="CORE MOVEMENT" Foreground="#555" FontSize="9" FontWeight="Bold" Margin="0,0,0,10"/>
@@ -332,7 +327,6 @@
                     </StackPanel>
                 </Border>
 
-                <!-- SYSTEM -->
                 <Border Background="#AA1A1A1A" CornerRadius="8" Padding="12">
                     <StackPanel>
                         <TextBlock Text="SYSTEM &amp; DEBUGGING" Foreground="#555" FontSize="9" FontWeight="Bold" Margin="0,0,0,10"/>
