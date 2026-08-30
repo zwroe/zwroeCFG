@@ -1,0 +1,60 @@
+{
+  "runtimeTarget": {
+    "name": ".NETCoreApp,Version=v8.0/win-x64",
+    "signature": ""
+  },
+  "compilationOptions": {},
+  "targets": {
+    ".NETCoreApp,Version=v8.0": {},
+    ".NETCoreApp,Version=v8.0/win-x64": {
+      "zwroe/1.0.0": {
+        "dependencies": {
+          "Nefarius.ViGEm.Client": "1.16.150"
+        },
+        "runtime": {
+          "zwroe.dll": {}
+        }
+      },
+      "JetBrains.Annotations/2018.3.0": {
+        "runtime": {
+          "lib/netstandard2.0/JetBrains.Annotations.dll": {
+            "assemblyVersion": "2018.3.0.0",
+            "fileVersion": "2018.3.0.0"
+          }
+        }
+      },
+      "Nefarius.ViGEm.Client/1.16.150": {
+        "dependencies": {
+          "JetBrains.Annotations": "2018.3.0"
+        },
+        "runtime": {
+          "lib/netcoreapp2.2/Nefarius.ViGEm.Client.dll": {
+            "assemblyVersion": "1.16.150.0",
+            "fileVersion": "1.16.150.0"
+          }
+        }
+      }
+    }
+  },
+  "libraries": {
+    "zwroe/1.0.0": {
+      "type": "project",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "JetBrains.Annotations/2018.3.0": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-Hbt5edAd7OfnYwsRayYguECzIJ4FUWDGjeEHsmxIgEpBbqZglhpxqjPWnWN/pEQM1HFGojMrR9dsywmC8pPTeQ==",
+      "path": "jetbrains.annotations/2018.3.0",
+      "hashPath": "jetbrains.annotations.2018.3.0.nupkg.sha512"
+    },
+    "Nefarius.ViGEm.Client/1.16.150": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-Wj+MbaIa5F2yjoCUIPVA8PQX95dv7NIxytlXJbwanwjm3DruM2z30UJ6uhQm6Xnm3IPUs88f2L1HqvL8ZK6Ifw==",
+      "path": "nefarius.vigem.client/1.16.150",
+      "hashPath": "nefarius.vigem.client.1.16.150.nupkg.sha512"
+    }
+  }
+}

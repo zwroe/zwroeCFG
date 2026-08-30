@@ -1,0 +1,361 @@
+<Page x:Class="Rebind.Views.MappingPageV2"
+      xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+      Title="MappingPageV2">
+
+    <Page.Resources>
+        <Style x:Key="ModernBindButton" TargetType="Button">
+            <Setter Property="Background" Value="#9922222E"/>
+            <Setter Property="Foreground" Value="#DDD"/>
+            <Setter Property="BorderBrush" Value="#444455"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="8,4"/>
+            <Setter Property="FontSize" Value="11"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Height" Value="28"/>
+            <Setter Property="Width" Value="85"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="border" Background="{TemplateBinding Background}" 
+                                BorderBrush="{TemplateBinding BorderBrush}" 
+                                BorderThickness="{TemplateBinding BorderThickness}" 
+                                CornerRadius="6">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="border" Property="Background" Value="#007ACC"/>
+                                <Setter TargetName="border" Property="BorderBrush" Value="#0099FF"/>
+                                <Setter Property="Foreground" Value="White"/>
+                            </Trigger>
+                            <Trigger Property="Tag" Value="Active">
+                                <Setter TargetName="border" Property="Background" Value="#CCFF8C00"/>
+                                <Setter TargetName="border" Property="BorderBrush" Value="#FFA500"/>
+                                <Setter Property="Foreground" Value="White"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="PillRadioButton" TargetType="RadioButton">
+            <Setter Property="Background" Value="#881E1E28"/>
+            <Setter Property="Foreground" Value="#888"/>
+            <Setter Property="BorderBrush" Value="#444"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="FontSize" Value="10"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Padding" Value="10,4"/>
+            <Setter Property="Margin" Value="0,0,4,0"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RadioButton">
+                        <Border x:Name="border" Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="5" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="border" Property="BorderBrush" Value="#007ACC"/>
+                                <Setter Property="Foreground" Value="#CCC"/>
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="border" Property="Background" Value="#007ACC"/>
+                                <Setter TargetName="border" Property="BorderBrush" Value="#0099FF"/>
+                                <Setter Property="Foreground" Value="White"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="ModernToggle" TargetType="CheckBox">
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="CheckBox">
+                        <BulletDecorator Background="Transparent">
+                            <BulletDecorator.Bullet>
+                                <Border x:Name="Background" Width="36" Height="18" CornerRadius="9" Background="#333" BorderThickness="0">
+                                    <Ellipse x:Name="Dot" Width="14" Height="14" Fill="#777" HorizontalAlignment="Left" Margin="2,0,0,0">
+                                        <Ellipse.RenderTransform>
+                                            <TranslateTransform X="0"/>
+                                        </Ellipse.RenderTransform>
+                                    </Ellipse>
+                                </Border>
+                            </BulletDecorator.Bullet>
+                        </BulletDecorator>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Background" Property="Background" Value="#00CC66"/>
+                                <Setter TargetName="Dot" Property="Fill" Value="White"/>
+                                <Trigger.EnterActions>
+                                    <BeginStoryboard>
+                                        <Storyboard>
+                                            <DoubleAnimation Storyboard.TargetName="Dot" Storyboard.TargetProperty="(UIElement.RenderTransform).(TranslateTransform.X)" To="18" Duration="0:0:0.1"/>
+                                        </Storyboard>
+                                    </BeginStoryboard>
+                                </Trigger.EnterActions>
+                                <Trigger.ExitActions>
+                                    <BeginStoryboard>
+                                        <Storyboard>
+                                            <DoubleAnimation Storyboard.TargetName="Dot" Storyboard.TargetProperty="(UIElement.RenderTransform).(TranslateTransform.X)" To="0" Duration="0:0:0.1"/>
+                                        </Storyboard>
+                                    </BeginStoryboard>
+                                </Trigger.ExitActions>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="ProLabel" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="#EEE"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+        </Style>
+
+        <Style x:Key="ModernTextBox" TargetType="TextBox">
+            <Setter Property="Background" Value="#9922222E"/>
+            <Setter Property="Foreground" Value="#DDD"/>
+            <Setter Property="BorderBrush" Value="#444455"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="FontSize" Value="11"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Height" Value="28"/>
+            <Setter Property="Width" Value="85"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+            <Setter Property="HorizontalContentAlignment" Value="Center"/>
+            <Setter Property="CaretBrush" Value="#AAA"/>
+            <Setter Property="SelectionBrush" Value="#007ACC"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TextBox">
+                        <Border x:Name="border"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="6">
+                            <ScrollViewer x:Name="PART_ContentHost"
+                                          Margin="4,0"
+                                          VerticalAlignment="Center"
+                                          HorizontalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsFocused" Value="True">
+                                <Setter TargetName="border" Property="BorderBrush" Value="#007ACC"/>
+                                <Setter TargetName="border" Property="Background" Value="#BB22222E"/>
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="border" Property="BorderBrush" Value="#555566"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Custom Dark ScrollBar Style -->
+        <Style TargetType="{x:Type ScrollBar}">
+            <Setter Property="Stylus.IsPressAndHoldEnabled" Value="False"/>
+            <Setter Property="Stylus.IsFlicksEnabled" Value="False"/>
+            <Setter Property="Width" Value="6"/>
+            <Setter Property="MinWidth" Value="6"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="{x:Type ScrollBar}">
+                        <Grid x:Name="Bg" SnapsToDevicePixels="True" Background="Transparent">
+                            <Track x:Name="PART_Track" IsDirectionReversed="True" IsEnabled="{TemplateBinding IsMouseOver}">
+                                <Track.DecreaseRepeatButton>
+                                    <RepeatButton Command="{x:Static ScrollBar.PageUpCommand}" Focusable="False">
+                                        <RepeatButton.Template>
+                                            <ControlTemplate TargetType="{x:Type RepeatButton}">
+                                                <Rectangle Fill="Transparent"/>
+                                            </ControlTemplate>
+                                        </RepeatButton.Template>
+                                    </RepeatButton>
+                                </Track.DecreaseRepeatButton>
+                                <Track.IncreaseRepeatButton>
+                                    <RepeatButton Command="{x:Static ScrollBar.PageDownCommand}" Focusable="False">
+                                        <RepeatButton.Template>
+                                            <ControlTemplate TargetType="{x:Type RepeatButton}">
+                                                <Rectangle Fill="Transparent"/>
+                                            </ControlTemplate>
+                                        </RepeatButton.Template>
+                                    </RepeatButton>
+                                </Track.IncreaseRepeatButton>
+                                <Track.Thumb>
+                                    <Thumb x:Name="Thumb">
+                                        <Thumb.Template>
+                                            <ControlTemplate TargetType="{x:Type Thumb}">
+                                                <Border x:Name="rect" Background="#333333" CornerRadius="3"/>
+                                                <ControlTemplate.Triggers>
+                                                    <Trigger Property="IsMouseOver" Value="True">
+                                                        <Setter TargetName="rect" Property="Background" Value="#007ACC"/>
+                                                    </Trigger>
+                                                    <Trigger Property="IsDragging" Value="True">
+                                                        <Setter TargetName="rect" Property="Background" Value="#00CC66"/>
+                                                    </Trigger>
+                                                </ControlTemplate.Triggers>
+                                            </ControlTemplate>
+                                        </Thumb.Template>
+                                    </Thumb>
+                                </Track.Thumb>
+                            </Track>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Page.Resources>
+
+    <Grid Margin="15">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <StackPanel Grid.Row="0" Margin="0,0,0,15">
+            <TextBlock x:Name="StatusText" Text="ENABLED" Foreground="#00CC66" FontSize="14" FontWeight="Bold" HorizontalAlignment="Center"/>
+            <TextBlock Text="Press [Insert] to Toggle" Foreground="#666" FontSize="10" HorizontalAlignment="Center"/>
+        </StackPanel>
+
+        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+            <Grid>
+                <!-- Konata Mascot Background (Scrollable) -->
+                <Image Source="/konata2.png" HorizontalAlignment="Right" VerticalAlignment="Bottom" 
+                       Height="220" Stretch="Uniform" Margin="0,0,0,-10" IsHitTestVisible="False" Opacity="0.95">
+                    <Image.RenderTransform>
+                        <RotateTransform Angle="-15" CenterX="100" CenterY="180"/>
+                    </Image.RenderTransform>
+                </Image>
+                
+                <StackPanel>
+                <!-- FEATURES -->
+                <Border Background="#AA1A1A1A" CornerRadius="8" Padding="12" Margin="0,0,0,12">
+                    <StackPanel>
+                        <TextBlock Text="MACRO FEATURES" Foreground="#555" FontSize="9" FontWeight="Bold" Margin="0,0,0,10"/>
+                        <Grid Margin="0,0,0,10">
+                            <TextBlock Text="TAP STRAFE" Style="{StaticResource ProLabel}"/>
+                            <CheckBox x:Name="togStrafe" Style="{StaticResource ModernToggle}" HorizontalAlignment="Right" Click="Setting_Changed"/>
+                        </Grid>
+                        <Grid>
+                            <TextBlock Text="AUTO JUMP" Style="{StaticResource ProLabel}"/>
+                            <CheckBox x:Name="togJump" Style="{StaticResource ModernToggle}" HorizontalAlignment="Right" Click="Setting_Changed"/>
+                        </Grid>
+                    </StackPanel>
+                </Border>
+
+                <!-- TECHNIQUE BINDINGS -->
+                <Border Background="#AA1A1A1A" CornerRadius="8" Padding="12" Margin="0,0,0,12">
+                    <StackPanel>
+                        <TextBlock Text="TECHNIQUES" Foreground="#555" FontSize="9" FontWeight="Bold" Margin="0,0,0,12"/>
+                        
+                        <Grid Margin="0,0,0,4">
+                            <TextBlock Text="tap strafe key" Style="{StaticResource ProLabel}"/>
+                            <Button x:Name="btnTapStrafeKey" Style="{StaticResource ModernBindButton}" HorizontalAlignment="Right" Click="BindButton_Click"/>
+                        </Grid>
+                        <Grid Margin="0,0,0,10">
+                            <TextBlock Text="trigger mode" Foreground="#666" FontSize="11" VerticalAlignment="Center"/>
+                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                                <RadioButton x:Name="radStrafeHold" Content="Hold" GroupName="StrafeTriggerGroup" Style="{StaticResource PillRadioButton}" Checked="Setting_Changed"/>
+                                <RadioButton x:Name="radStrafeToggle" Content="Toggle" GroupName="StrafeTriggerGroup" Style="{StaticResource PillRadioButton}" Checked="Setting_Changed"/>
+                            </StackPanel>
+                        </Grid>
+
+                        <Grid Margin="0,0,0,10">
+                            <TextBlock Text="mantle jump" Style="{StaticResource ProLabel}"/>
+                            <Button x:Name="btnDPadUp" Style="{StaticResource ModernBindButton}" HorizontalAlignment="Right" Click="BindButton_Click"/>
+                        </Grid>
+
+                        <Grid Margin="0,0,0,4">
+                            <TextBlock Text="superglide" Style="{StaticResource ProLabel}"/>
+                            <Button x:Name="btnDPadDown" Style="{StaticResource ModernBindButton}" HorizontalAlignment="Right" Click="BindButton_Click"/>
+                        </Grid>
+                        <Grid Margin="0,0,0,10">
+                            <TextBlock Text="target fps" Foreground="#666" FontSize="11" VerticalAlignment="Center"/>
+                            <TextBox x:Name="txtSuperglideFps" Style="{StaticResource ModernTextBox}" HorizontalAlignment="Right"
+                                     TextChanged="SuperglideFps_Changed"
+                                     ToolTip="Set this to your in-game FPS cap (e.g. 60, 144, 240)"/>
+                        </Grid>
+
+                        <Grid>
+                            <TextBlock Text="fast loot" Style="{StaticResource ProLabel}"/>
+                            <Button x:Name="btnDPadRight" Style="{StaticResource ModernBindButton}" HorizontalAlignment="Right" Click="BindButton_Click"/>
+                        </Grid>
+
+                        <Grid Margin="0,10,0,4">
+                            <TextBlock Text="inspect spam" Style="{StaticResource ProLabel}"/>
+                            <Button x:Name="btnInspect" Style="{StaticResource ModernBindButton}" HorizontalAlignment="Right" Click="BindButton_Click"/>
+                        </Grid>
+                        <Grid Margin="0,0,0,0">
+                            <TextBlock Text="inspect speed (ms)" Foreground="#666" FontSize="11" VerticalAlignment="Center"/>
+                            <TextBox x:Name="txtInspectDelayMs" Style="{StaticResource ModernTextBox}" HorizontalAlignment="Right"
+                                     TextChanged="InspectDelayMs_Changed"
+                                     ToolTip="Delay in milliseconds between inspect key toggles (e.g. 15, 30, 50)"/>
+                        </Grid>
+                    </StackPanel>
+                </Border>
+
+                <!-- MOVEMENT BINDINGS -->
+                <Border Background="#AA1A1A1A" CornerRadius="8" Padding="12" Margin="0,0,0,12">
+                    <StackPanel>
+                        <TextBlock Text="CORE MOVEMENT" Foreground="#555" FontSize="9" FontWeight="Bold" Margin="0,0,0,10"/>
+                        <Grid Margin="0,0,0,8">
+                            <TextBlock Text="Forward" Foreground="#AAA" VerticalAlignment="Center"/>
+                            <Button x:Name="btnForward" Style="{StaticResource ModernBindButton}" HorizontalAlignment="Right" Click="BindButton_Click"/>
+                        </Grid>
+                        <Grid Margin="0,0,0,8">
+                            <TextBlock Text="Backward" Foreground="#AAA" VerticalAlignment="Center"/>
+                            <Button x:Name="btnBackward" Style="{StaticResource ModernBindButton}" HorizontalAlignment="Right" Click="BindButton_Click"/>
+                        </Grid>
+                        <Grid Margin="0,0,0,8">
+                            <TextBlock Text="Left" Foreground="#AAA" VerticalAlignment="Center"/>
+                            <Button x:Name="btnLeft" Style="{StaticResource ModernBindButton}" HorizontalAlignment="Right" Click="BindButton_Click"/>
+                        </Grid>
+                        <Grid Margin="0,0,0,8">
+                            <TextBlock Text="Right" Foreground="#AAA" VerticalAlignment="Center"/>
+                            <Button x:Name="btnRight" Style="{StaticResource ModernBindButton}" HorizontalAlignment="Right" Click="BindButton_Click"/>
+                        </Grid>
+                        <Grid>
+                            <TextBlock Text="Jump" Foreground="#AAA" VerticalAlignment="Center"/>
+                            <Button x:Name="btnJump" Style="{StaticResource ModernBindButton}" HorizontalAlignment="Right" Click="BindButton_Click"/>
+                        </Grid>
+                    </StackPanel>
+                </Border>
+
+                <!-- SYSTEM -->
+                <Border Background="#AA1A1A1A" CornerRadius="8" Padding="12">
+                    <StackPanel>
+                        <TextBlock Text="SYSTEM &amp; DEBUGGING" Foreground="#555" FontSize="9" FontWeight="Bold" Margin="0,0,0,10"/>
+                        <Grid Margin="0,0,0,8">
+                            <TextBlock Text="Toggle Shortcut" Foreground="#AAA" VerticalAlignment="Center"/>
+                            <Button x:Name="btnToggle" Style="{StaticResource ModernBindButton}" HorizontalAlignment="Right" Click="BindButton_Click"/>
+                        </Grid>
+                        <Grid>
+                            <TextBlock Text="Movement Log" Foreground="#AAA" VerticalAlignment="Center"/>
+                            <Button x:Name="btnViewLog" Content="VIEW LOG" Style="{StaticResource ModernBindButton}" HorizontalAlignment="Right" Click="ViewLogButton_Click"/>
+                        </Grid>
+                    </StackPanel>
+                </Border>
+            </StackPanel>
+            </Grid>
+        </ScrollViewer>
+
+        <Button Grid.Row="2" Content="SAVE CONFIGURATION" Background="#AA007ACC" Foreground="White" FontWeight="Bold" Height="36" Margin="0,15,0,0" BorderThickness="0" Click="SaveButton_Click">
+            <Button.Resources>
+                <Style TargetType="Border">
+                    <Setter Property="CornerRadius" Value="6"/>
+                </Style>
+            </Button.Resources>
+        </Button>
+    </Grid>
+</Page>
