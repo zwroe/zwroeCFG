@@ -1,6 +1,6 @@
 using System;
-using System.IO;
 using System.Text.Json;
+using System.IO;
 using Rebind.Core.Models;
 
 namespace Rebind.Services
@@ -16,55 +16,71 @@ namespace Rebind.Services
 
         public MappingConfig LoadConfig()
         {
-            EnsureConfigDirectory();
-            TryMigrateLegacyConfig();
-
-            if (!File.Exists(ConfigFilePath))
-            {
-                var defaultConfig = new MappingConfig();
-                SaveConfig(defaultConfig);
-                return defaultConfig;
-            }
-
             try
             {
+                Directory.CreateDirectory(ConfigDirectory);
+                TryMigrateLegacyConfig();
+
+                if (!File.Exists(ConfigFilePath))
+                {
+                    var defaultConfig = new MappingConfig();
+                    TrySaveConfig(defaultConfig, out _);
+                    return defaultConfig;
+                }
+
                 string json = File.ReadAllText(ConfigFilePath);
+                MappingConfig config = JsonSerializer.Deserialize<MappingConfig>(json)
+                    ?? throw new JsonException("Expected a configuration object.");
                 bool hasFastLootKey = HasJsonProperty(json, nameof(MappingConfig.FastLootKey));
-                MappingConfig config = JsonSerializer.Deserialize<MappingConfig>(json) ?? new MappingConfig();
 
                 NormalizeConfig(config, hasFastLootKey);
                 if (!hasFastLootKey)
-                    SaveConfig(config);
+                    TrySaveConfig(config, out _);
 
                 return config;
             }
-            catch
+            catch (JsonException ex)
             {
+                Console.WriteLine($"Invalid config JSON: {ex.Message}");
                 var defaultConfig = new MappingConfig();
-                SaveConfig(defaultConfig);
+                // Preserve the user's file before creating defaults so a bad edit
+                // or interrupted write does not silently destroy their settings.
+                if (TryArchiveInvalidConfig())
+                    TrySaveConfig(defaultConfig, out _);
                 return defaultConfig;
-            }
-        }
-
-        public void SaveConfig(MappingConfig config)
-        {
-            try
-            {
-                EnsureConfigDirectory();
-                NormalizeConfig(config, hasFastLootKey: true);
-
-                string json = JsonSerializer.Serialize(config, new JsonSerializerOptions { WriteIndented = true });
-                File.WriteAllText(ConfigFilePath, json);
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Error saving config: {ex.Message}");
+                // I/O and other failures should not overwrite a config we could
+                // not safely read.
+                Console.WriteLine($"Error loading config: {ex.Message}");
+                return new MappingConfig();
             }
         }
 
-        private static void EnsureConfigDirectory()
+        public bool TrySaveConfig(MappingConfig config, out string? error)
         {
-            Directory.CreateDirectory(ConfigDirectory);
+            string temporaryPath = Path.Combine(ConfigDirectory, $"{ConfigFileName}.{Guid.NewGuid():N}.tmp");
+            try
+            {
+                Directory.CreateDirectory(ConfigDirectory);
+                NormalizeConfig(config, hasFastLootKey: true);
+
+                string json = JsonSerializer.Serialize(config, new JsonSerializerOptions { WriteIndented = true });
+                File.WriteAllText(temporaryPath, json);
+                File.Move(temporaryPath, ConfigFilePath, overwrite: true);
+                error = null;
+                return true;
+            }
+            catch (Exception ex)
+            {
+                error = ex.Message;
+                KeyLogger.Log($"Error saving config: {error}");
+                try { File.Delete(temporaryPath); }
+                catch (IOException) { }
+                catch (UnauthorizedAccessException) { }
+                return false;
+            }
         }
 
         private static void TryMigrateLegacyConfig()
@@ -79,6 +95,25 @@ namespace Rebind.Services
             catch (Exception ex)
             {
                 Console.WriteLine($"Error migrating config: {ex.Message}");
+            }
+        }
+
+        private static bool TryArchiveInvalidConfig()
+        {
+            if (!File.Exists(ConfigFilePath))
+                return true;
+
+            string archivedPath = ConfigFilePath + ".invalid-" + DateTime.UtcNow.ToString("yyyyMMdd-HHmmss-fff");
+            try
+            {
+                File.Move(ConfigFilePath, archivedPath);
+                Console.WriteLine($"Invalid config preserved at: {archivedPath}");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Unable to preserve invalid config: {ex.Message}");
+                return false;
             }
         }
 
@@ -99,6 +134,8 @@ namespace Rebind.Services
             config.JoystickXNegative = DefaultIfBlank(config.JoystickXNegative, "A");
             config.JoystickYPositive = DefaultIfBlank(config.JoystickYPositive, "W");
             config.JoystickYNegative = DefaultIfBlank(config.JoystickYNegative, "S");
+            config.AutoJumpIntervalMs = Math.Max(MappingConfig.MinimumAutoJumpIntervalMs, config.AutoJumpIntervalMs);
+            config.MantleJumpFps = Math.Max(MappingConfig.MinimumMantleJumpFps, config.MantleJumpFps);
 
             if (!hasFastLootKey && !string.IsNullOrWhiteSpace(config.DPadRight))
             {

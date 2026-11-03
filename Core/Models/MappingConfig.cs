@@ -5,9 +5,14 @@ namespace Rebind.Core.Models
 {
     public class MappingConfig
     {
+        internal const int MinimumAutoJumpIntervalMs = 10;
+        internal const int MinimumMantleJumpFps = 30;
+
         public string? ToggleShortcut { get; set; } = "Insert";
 
         public string? DPadUp { get; set; } = "X";
+        public bool UseAppMantleJumpTiming { get; set; }
+        public int MantleJumpFps { get; set; } = 144;
         public string? DPadDown { get; set; } = "V";
         public int SuperglideFps { get; set; } = 144;
         public string? DPadLeft { get; set; }
@@ -27,6 +32,7 @@ namespace Rebind.Core.Models
         public string? TapStrafeKey { get; set; } = "Space";
         public bool IsStrafeToggleMode { get; set; } = false;
         public bool IsJumpSpamEnabled { get; set; } = false;
+        public int AutoJumpIntervalMs { get; set; } = 30;
 
         // These output keys must match the corresponding in-game bindings.
         public string? TapStrafeForward { get; set; } = "I";

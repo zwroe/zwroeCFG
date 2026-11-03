@@ -1,4 +1,5 @@
 using System;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 
@@ -18,6 +19,9 @@ namespace Rebind.Services
         private LowLevelKeyboardProc _proc;
         private IntPtr _hookID = IntPtr.Zero;
 
+        public bool IsInstalled => _hookID != IntPtr.Zero;
+        public string? ErrorMessage { get; private set; }
+
         public event Func<int, bool, bool>? KeyEvent;
 
         public KeyboardHook()
@@ -32,9 +36,15 @@ namespace Rebind.Services
             using (ProcessModule? curModule = curProcess.MainModule)
             {
                 if (curModule?.ModuleName == null)
+                {
+                    ErrorMessage = "Could not determine the current process module.";
                     return IntPtr.Zero;
+                }
 
-                return SetWindowsHookEx(WH_KEYBOARD_LL, proc, GetModuleHandle(curModule.ModuleName), 0);
+                IntPtr hook = SetWindowsHookEx(WH_KEYBOARD_LL, proc, GetModuleHandle(curModule.ModuleName), 0);
+                if (hook == IntPtr.Zero)
+                    ErrorMessage = new Win32Exception(Marshal.GetLastWin32Error()).Message;
+                return hook;
             }
         }
 

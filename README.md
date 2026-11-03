@@ -1,4 +1,4 @@
-# zwroe CFG 
+# zwroe CFG
 
 A MnK-to-Controller movement remapper for Apex Legends. 
 
@@ -7,12 +7,14 @@ A MnK-to-Controller movement remapper for Apex Legends.
 [**Download Release**](https://github.com/zwroee/zwroeCFG/releases/latest) • [**Discord**](https://discord.gg/DgJuRp2tj5) • [**Ko-fi**](https://ko-fi.com/zwroe)
 <img width="837" height="438" alt="6f5ac5d50a5729cebd1fc6f896fa912b" src="https://github.com/user-attachments/assets/a281e6f6-ff87-450a-bb1b-65354513e3d5" />
 
- 
+
 ## Features
 
 - **Tap Strafing**: Keyboard lurches on top of controller movement.
 - **SnapTap**: Clean A/D counter-strafing without keys getting stuck.
-- **Auto Jump**: Continuous bhops while holding Space.
+- **Auto Jump**: Repeat Jump while holding its bind (Space by default). **Jump interval (ms)** is the time between presses and defaults to 30 ms. With Auto Jump off, each physical press sends one jump, including during tap-strafing.
+- **Mantle Jump**: Hold the bind (X by default) to let the linked Steam Input layout run its original sequence. The optional **App timing override** uses the experimental app sequence and its own FPS setting (144 by default).
+- **Input Test**: Open it under **System & Debugging** to capture mapped inputs and app output requests with elapsed times and gaps. Steam Input and Apex events are outside this trace.
 - **Fast Loot**: Spams `E` to quickly loot deathboxes.
 - **Quick Toggle**: Press **Insert** to turn on/off.
 
@@ -23,6 +25,7 @@ A MnK-to-Controller movement remapper for Apex Legends.
 1. **Install ViGEmBus**: Needed for virtual controller output. [Download ViGEmBus](https://github.com/ViGEm/ViGEmBus/releases).
 2. **Steam Layout**: Use this layout: [Steam Layout](https://f7v3.short.gy/BPHHWR).
 3. **Run as Admin**: Right-click the app and run as Admin (needed for key blocking).
+4. **In-game Jump bind**: Keep `Y` bound to Jump when using the default config. The app sends that keyboard binding for Jump and Auto Jump.
 
 ---
 

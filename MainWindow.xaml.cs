@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
@@ -19,16 +20,35 @@ namespace Rebind
 
             if (App.KeyMapper != null)
             {
+                UpdateStatusUI(App.KeyMapper.IsEnabled);
                 App.KeyMapper.OnToggleChanged += UpdateStatusUI;
             }
         }
 
         private void CheckViGEmStatus()
         {
-            if (App.KeyMapper != null && !App.KeyMapper.IsViGEmConnected)
+            if (App.KeyMapper == null) return;
+
+            var warnings = new List<string>();
+            var details = new List<string>();
+
+            if (!App.KeyMapper.IsViGEmConnected)
             {
-                ViGEmWarningText.Visibility = Visibility.Visible;
-                ViGEmWarningText.ToolTip = "ViGEmBus driver is not installed or failed to initialize. Controller inputs won't work until installed.";
+                warnings.Add("ViGEm unavailable");
+                details.Add("ViGEmBus driver is not installed or failed to initialize. Controller inputs won't work until installed.");
+            }
+
+            if (!string.IsNullOrWhiteSpace(App.KeyMapper.InputHookErrorMessage))
+            {
+                warnings.Add("Input hook unavailable");
+                details.Add(App.KeyMapper.InputHookErrorMessage);
+            }
+
+            if (warnings.Count > 0)
+            {
+                SystemWarningText.Text = "⚠️ " + string.Join(" | ", warnings);
+                SystemWarningText.ToolTip = string.Join(Environment.NewLine, details);
+                SystemWarningText.Visibility = Visibility.Visible;
             }
         }
 
