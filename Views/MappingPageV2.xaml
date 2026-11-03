@@ -244,9 +244,15 @@
                             <TextBlock Text="TAP STRAFE" Style="{StaticResource ProLabel}"/>
                             <CheckBox x:Name="togStrafe" Style="{StaticResource ModernToggle}" HorizontalAlignment="Right" Click="Setting_Changed"/>
                         </Grid>
-                        <Grid>
+                        <Grid Margin="0,0,0,4">
                             <TextBlock Text="AUTO JUMP" Style="{StaticResource ProLabel}"/>
                             <CheckBox x:Name="togJump" Style="{StaticResource ModernToggle}" HorizontalAlignment="Right" Click="Setting_Changed"/>
+                        </Grid>
+                        <Grid>
+                            <TextBlock Text="jump interval (ms)" Foreground="#666" FontSize="11" VerticalAlignment="Center"/>
+                            <TextBox x:Name="txtAutoJumpIntervalMs" Style="{StaticResource ModernTextBox}" HorizontalAlignment="Right"
+                                     TextChanged="AutoJumpIntervalMs_Changed"
+                                     ToolTip="Time between successive jump presses while Auto Jump is on. Minimum 10 ms."/>
                         </Grid>
                     </StackPanel>
                 </Border>
@@ -267,9 +273,21 @@
                             </StackPanel>
                         </Grid>
 
-                        <Grid Margin="0,0,0,10">
+                        <Grid Margin="0,0,0,4">
                             <TextBlock Text="mantle jump" Style="{StaticResource ProLabel}"/>
                             <Button x:Name="btnDPadUp" Style="{StaticResource ModernBindButton}" HorizontalAlignment="Right" Click="BindButton_Click"/>
+                        </Grid>
+                        <Grid Margin="0,0,0,4">
+                            <TextBlock Text="App timing override" Foreground="#AAA" FontSize="11" VerticalAlignment="Center"/>
+                            <CheckBox x:Name="togMantleTiming" Style="{StaticResource ModernToggle}" HorizontalAlignment="Right"
+                                      Click="Setting_Changed" AutomationProperties.Name="Mantle Jump app timing override"
+                                      ToolTip="Off uses the original Steam Input timing. On uses the experimental app sequence."/>
+                        </Grid>
+                        <Grid Margin="0,0,0,10">
+                            <TextBlock Text="App timing FPS" Foreground="#AAA" FontSize="11" VerticalAlignment="Center"/>
+                            <TextBox x:Name="txtMantleJumpFps" Style="{StaticResource ModernTextBox}" HorizontalAlignment="Right"
+                                     TextChanged="MantleJumpFps_Changed" IsEnabled="{Binding IsChecked, ElementName=togMantleTiming}"
+                                     ToolTip="Set this to your in-game FPS cap when the timing override is on. Minimum 30 FPS."/>
                         </Grid>
 
                         <Grid Margin="0,0,0,4">
@@ -333,6 +351,10 @@
                         <Grid Margin="0,0,0,8">
                             <TextBlock Text="Toggle Shortcut" Foreground="#AAA" VerticalAlignment="Center"/>
                             <Button x:Name="btnToggle" Style="{StaticResource ModernBindButton}" HorizontalAlignment="Right" Click="BindButton_Click"/>
+                        </Grid>
+                        <Grid Margin="0,0,0,8">
+                            <TextBlock Text="Input Test" Foreground="#AAA" VerticalAlignment="Center"/>
+                            <Button Content="OPEN TEST" Style="{StaticResource ModernBindButton}" HorizontalAlignment="Right" Click="InputTestButton_Click"/>
                         </Grid>
                         <Grid>
                             <TextBlock Text="Movement Log" Foreground="#AAA" VerticalAlignment="Center"/>

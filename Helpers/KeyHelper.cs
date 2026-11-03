@@ -3,6 +3,8 @@ using System.Windows.Input;
 
 namespace Rebind.Helpers
 {
+    public readonly record struct ScanCode(byte Code, bool IsExtended);
+
     public static class KeyHelper
     {
         public const int VK_MBUTTON  = 0x04;
@@ -63,6 +65,19 @@ namespace Rebind.Helpers
             };
         }
 
+        internal static string GetInputName(int vkCode)
+        {
+            Key key = KeyInterop.KeyFromVirtualKey(vkCode);
+            return GetMouseButtonName(vkCode) ?? (key == Key.None ? $"VK 0x{vkCode:X2}" : GetConfigKeyName(key));
+        }
+
+        internal static string GetScanCodeName(ScanCode scanCode)
+        {
+            uint code = scanCode.Code | (scanCode.IsExtended ? 0xE000u : 0u);
+            uint vk = MapVirtualKey(code, 3); // MAPVK_VSC_TO_VK_EX
+            return vk == 0 ? $"Scan 0x{code:X2}" : GetInputName((int)vk);
+        }
+
         private static string NormalizeKeyString(string keyString)
         {
             string trimmed = keyString.Trim();
@@ -84,12 +99,18 @@ namespace Rebind.Helpers
         [System.Runtime.InteropServices.DllImport("user32.dll")]
         private static extern uint MapVirtualKey(uint uCode, uint uMapType);
 
-        public static byte GetScanCode(string keyString, byte fallback)
+        public static ScanCode GetScanCode(string keyString, ScanCode fallback)
         {
             int vk = GetVirtualKeyCode(keyString);
             if (vk <= 0) return fallback;
-            uint scan = MapVirtualKey((uint)vk, 0); // MAPVK_VK_TO_VSC
-            return scan > 0 ? (byte)scan : fallback;
+
+            // MAPVK_VK_TO_VSC_EX returns an E0/E1 prefix in the high byte for
+            // keys that need the extended-key flag when injected.
+            uint mapped = MapVirtualKey((uint)vk, 4);
+            if (mapped == 0) return fallback;
+
+            byte prefix = (byte)((mapped >> 8) & 0xFF);
+            return new ScanCode((byte)(mapped & 0xFF), prefix == 0xE0);
         }
     }
 }

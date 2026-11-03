@@ -3,6 +3,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Threading;
 using Rebind.Core.Models;
 using Rebind.Helpers;
 using Rebind.Services;
@@ -14,7 +15,11 @@ namespace Rebind.Views
         private ConfigManager _configManager;
         private MappingConfig _config;
         private Button? _activeBindButton;
+        private InputTestWindow? _inputTestWindow;
         private string? _previousBindValue;
+        private bool _isLoadingConfig = true;
+        private string? _configSaveError;
+        private readonly DispatcherTimer _saveStatusTimer = new() { Interval = TimeSpan.FromSeconds(2) };
 
         public MappingPageV2()
         {
@@ -24,6 +29,13 @@ namespace Rebind.Views
             _configManager = App.ConfigManager ?? new ConfigManager();
             _config = _configManager.LoadConfig();
             LoadConfigToUI();
+            _isLoadingConfig = false;
+
+            _saveStatusTimer.Tick += (_, _) =>
+            {
+                _saveStatusTimer.Stop();
+                UpdateStatusText(App.KeyMapper?.IsEnabled ?? true);
+            };
 
             this.PreviewKeyDown += MappingPageV2_PreviewKeyDown;
             this.PreviewMouseDown += MappingPageV2_PreviewMouseDown;
@@ -31,13 +43,23 @@ namespace Rebind.Views
             if (App.KeyMapper != null)
             {
                 App.KeyMapper.OnToggleChanged += UpdateStatusText;
+                UpdateStatusText(App.KeyMapper.IsEnabled);
             }
         }
 
         private void UpdateStatusText(bool isEnabled)
         {
             this.Dispatcher.Invoke(() => {
+                if (_configSaveError != null)
+                {
+                    StatusText.Text = "CONFIG SAVE FAILED";
+                    StatusText.ToolTip = _configSaveError;
+                    StatusText.Foreground = Brushes.OrangeRed;
+                    return;
+                }
+
                 StatusText.Text = isEnabled ? "ENABLED" : "DISABLED";
+                StatusText.ToolTip = null;
                 StatusText.Foreground = new SolidColorBrush(isEnabled ? 
                     (Color)ColorConverter.ConvertFromString("#00CC66") : 
                     (Color)ColorConverter.ConvertFromString("#666666"));
@@ -61,16 +83,19 @@ namespace Rebind.Views
             
             togStrafe.IsChecked = _config.IsStrafeEnabled;
             togJump.IsChecked = _config.IsJumpSpamEnabled;
+            togMantleTiming.IsChecked = _config.UseAppMantleJumpTiming;
             if (_config.IsStrafeToggleMode)
                 radStrafeToggle.IsChecked = true;
             else
                 radStrafeHold.IsChecked = true;
 
+            txtAutoJumpIntervalMs.Text = _config.AutoJumpIntervalMs.ToString();
+            txtMantleJumpFps.Text = _config.MantleJumpFps.ToString();
             txtSuperglideFps.Text = _config.SuperglideFps.ToString();
             txtInspectDelayMs.Text = _config.InspectDelayMs.ToString();
         }
 
-        private void SaveConfigFromUI()
+        private bool SaveConfigFromUI()
         {
             _config.JoystickYPositive = btnForward.Content?.ToString();
             _config.JoystickYNegative = btnBackward.Content?.ToString();
@@ -88,38 +113,79 @@ namespace Rebind.Views
             _config.IsStrafeEnabled = togStrafe.IsChecked ?? false;
             _config.IsStrafeToggleMode = radStrafeToggle.IsChecked ?? false;
             _config.IsJumpSpamEnabled = togJump.IsChecked ?? false;
+            _config.UseAppMantleJumpTiming = togMantleTiming.IsChecked ?? false;
+            if (int.TryParse(txtAutoJumpIntervalMs.Text, out int jumpInterval) && jumpInterval >= MappingConfig.MinimumAutoJumpIntervalMs)
+                _config.AutoJumpIntervalMs = jumpInterval;
+            if (int.TryParse(txtMantleJumpFps.Text, out int mantleFps) && mantleFps >= MappingConfig.MinimumMantleJumpFps)
+                _config.MantleJumpFps = mantleFps;
             if (int.TryParse(txtSuperglideFps.Text, out int fps) && fps >= 30)
                 _config.SuperglideFps = fps;
             if (int.TryParse(txtInspectDelayMs.Text, out int delayMs) && delayMs >= 5)
                 _config.InspectDelayMs = delayMs;
 
-            _configManager.SaveConfig(_config);
+            return PersistConfig();
+        }
+
+        private bool PersistConfig()
+        {
+            if (!_configManager.TrySaveConfig(_config, out var error))
+            {
+                _saveStatusTimer.Stop();
+                _configSaveError = error ?? "Unable to write the configuration file.";
+                UpdateStatusText(App.KeyMapper?.IsEnabled ?? true);
+                return false;
+            }
+
+            if (_configSaveError != null)
+            {
+                _configSaveError = null;
+                UpdateStatusText(App.KeyMapper?.IsEnabled ?? true);
+            }
+
             App.KeyMapper?.ReloadConfig();
+            return true;
         }
 
         private void Setting_Changed(object sender, RoutedEventArgs e)
         {
-            SaveConfigFromUI();
+            if (!_isLoadingConfig)
+                SaveConfigFromUI();
+        }
+
+        private void AutoJumpIntervalMs_Changed(object sender, TextChangedEventArgs e)
+        {
+            if (!_isLoadingConfig && int.TryParse(txtAutoJumpIntervalMs.Text, out int interval) && interval >= MappingConfig.MinimumAutoJumpIntervalMs)
+            {
+                _config.AutoJumpIntervalMs = interval;
+                PersistConfig();
+            }
+        }
+
+        private void MantleJumpFps_Changed(object sender, TextChangedEventArgs e)
+        {
+            if (!_isLoadingConfig && int.TryParse(txtMantleJumpFps.Text, out int fps) && fps >= MappingConfig.MinimumMantleJumpFps)
+            {
+                _config.MantleJumpFps = fps;
+                PersistConfig();
+            }
         }
 
         private void SuperglideFps_Changed(object sender, TextChangedEventArgs e)
         {
             // TextChanged also fires for partial edits, so wait for a valid value.
-            if (int.TryParse(txtSuperglideFps.Text, out int fps) && fps >= 30)
+            if (!_isLoadingConfig && int.TryParse(txtSuperglideFps.Text, out int fps) && fps >= 30)
             {
                 _config.SuperglideFps = fps;
-                _configManager.SaveConfig(_config);
-                App.KeyMapper?.ReloadConfig();
+                PersistConfig();
             }
         }
 
         private void InspectDelayMs_Changed(object sender, TextChangedEventArgs e)
         {
-            if (int.TryParse(txtInspectDelayMs.Text, out int delayMs) && delayMs >= 5)
+            if (!_isLoadingConfig && int.TryParse(txtInspectDelayMs.Text, out int delayMs) && delayMs >= 5)
             {
                 _config.InspectDelayMs = delayMs;
-                _configManager.SaveConfig(_config);
-                App.KeyMapper?.ReloadConfig();
+                PersistConfig();
             }
         }
 
@@ -209,14 +275,26 @@ namespace Rebind.Views
 
         private void SaveButton_Click(object sender, RoutedEventArgs e)
         {
-            SaveConfigFromUI();
+            if (!SaveConfigFromUI())
+                return;
+
             StatusText.Text = "CONFIG SAVED";
-            var timer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
-            timer.Tick += (s, ev) => { 
-                StatusText.Text = (App.KeyMapper?.IsEnabled ?? true) ? "ENABLED" : "DISABLED"; 
-                timer.Stop(); 
-            };
-            timer.Start();
+            _saveStatusTimer.Stop();
+            _saveStatusTimer.Start();
+        }
+
+        private void InputTestButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (App.KeyMapper == null) return;
+            if (_inputTestWindow != null)
+            {
+                _inputTestWindow.Activate();
+                return;
+            }
+
+            _inputTestWindow = new InputTestWindow(App.KeyMapper.InputTrace) { Owner = Window.GetWindow(this) };
+            _inputTestWindow.Closed += (_, _) => _inputTestWindow = null;
+            _inputTestWindow.Show();
         }
 
         private void ViewLogButton_Click(object sender, RoutedEventArgs e)

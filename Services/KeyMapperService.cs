@@ -61,57 +61,95 @@ namespace Rebind.Services
 
         private const int KEYEVENTF_KEYUP = 0x0002;
         private const uint KEYEVENTF_SCANCODE = 0x0008;
+        private const uint KEYEVENTF_EXTENDEDKEY = 0x0001;
         private const byte VK_E = 0x45;
-        private const byte SCAN_E = 0x12;
-        private const byte SCAN_SPACE = 0x39;
+        private static readonly ScanCode SCAN_E = new(0x12, false);
         private const byte VK_N = 0x4E;
-        private const byte SCAN_N = 0x31;
+        private static readonly ScanCode SCAN_N = new(0x31, false);
 
-        private byte _scanForward = 0x17;
-        private byte _scanBackward = 0x25;
-        private byte _scanLeft = 0x24;
-        private byte _scanRight = 0x26;
-        private byte _scanJump = 0x15;
+        private ScanCode _scanForward = new(0x17, false);
+        private ScanCode _scanBackward = new(0x25, false);
+        private ScanCode _scanLeft = new(0x24, false);
+        private ScanCode _scanRight = new(0x26, false);
+        private ScanCode _scanJump = new(0x15, false);
 
-        private byte _scanCodeW = 0x11;
-        private byte _scanCodeS = 0x1F;
-        private byte _scanCodeA = 0x1E;
-        private byte _scanCodeD = 0x20;
+        private ScanCode _scanCodeW = new(0x11, false);
+        private ScanCode _scanCodeS = new(0x1F, false);
+        private ScanCode _scanCodeA = new(0x1E, false);
+        private ScanCode _scanCodeD = new(0x20, false);
 
         private readonly KeyboardHook _keyboardHook;
         private readonly MouseHook _mouseHook;
         private readonly ViGEmService _vigemService;
         private readonly ConfigManager _configManager;
 
-        private MappingConfig? _config;
-        private bool _isEnabled = true;
+        private volatile MappingConfig? _config;
+        private volatile bool _isEnabled = true;
+        private volatile bool _isReloading;
 
-        public bool IsEnabled => _isEnabled;
+        public bool IsEnabled => _isEnabled && IsViGEmConnected;
+
+        internal InputTrace InputTrace { get; } = new();
 
         public bool IsViGEmConnected => _vigemService.IsConnected;
 
+        public string? InputHookErrorMessage
+        {
+            get
+            {
+                var errors = new List<string>();
+                if (!_keyboardHook.IsInstalled)
+                    errors.Add($"Keyboard hook: {_keyboardHook.ErrorMessage ?? "installation failed"}");
+                if (!_mouseHook.IsInstalled)
+                    errors.Add($"Mouse hook: {_mouseHook.ErrorMessage ?? "installation failed"}");
+                return errors.Count == 0 ? null : string.Join(Environment.NewLine, errors);
+            }
+        }
+
         // Binding mode lets the UI capture a key without the hook blocking it.
-        public bool IsBindingMode { get; set; } = false;
+        public bool IsBindingMode
+        {
+            get => _isBindingMode;
+            set
+            {
+                if (_isBindingMode == value) return;
+                _isBindingMode = value;
+                if (value && IsEnabled) ClearVirtualInputs();
+            }
+        }
+
+        private volatile bool _isBindingMode;
 
         private int _toggleKeyVk;
+        // Both hooks run on the UI thread. A null generation means the original press passed through.
+        private readonly Dictionary<int, long?> _physicalKeyDowns = new();
         private int _strafeKeyVk;
         private int _jumpKeyVk;
         private int _moveLeftVk;
         private int _moveRightVk;
         private int _backVk;
+        private int _mantleJumpKeyVk;
         private int _superglideKeyVk;
         private int _tapStrafeTriggerVk;
 
         private Dictionary<int, Action<bool>> _keyPressActions;
         private readonly object _mappingLock = new object();
+        private readonly object _scanCodeLock = new object();
+        private readonly object _lifecycleLock = new object();
+        private readonly object _controllerLock = new object();
+        private readonly object _movementOutputLock = new object();
+        private long _inputGeneration;
 
         private readonly Thread _macroThread;
-        private bool _isRunning = true;
-        private bool _isStrafeKeyPressed = false;
-        private bool _isBackKeyPressed = false;
-        private bool _isJumpKeyPressed = false;
-        private bool _isTapStrafeTriggerPressed = false;
-        private bool _isStrafeToggledActive = false;
+        private volatile bool _isRunning = true;
+        private volatile bool _isStrafeKeyPressed = false;
+        private volatile bool _isBackKeyPressed = false;
+        private volatile bool _isJumpKeyPressed = false;
+        private volatile bool _isTapStrafeTriggerPressed;
+        private volatile bool _isStrafeToggledActive = false;
+        private bool _isSuperglideRunning;
+        private volatile bool _isMantleJumpRunning;
+        private long _jumpPressId;
 
         private short _currentJoyX = 0;
         private short _currentJoyY = 0;
@@ -120,25 +158,27 @@ namespace Rebind.Services
         private int _tapStrafeCounter = 0;
         private readonly Stopwatch _loopTimer = Stopwatch.StartNew();
         private readonly IntPtr _hrTimer;
-        private bool _jumpState = false;
-        private bool _lootState = false;
-        private bool _isLootKeyPressed = false;
-        private bool _inspectState = false;
-        private bool _isInspectKeyPressed = false;
+        private bool _jumpState;
+        private long _nextJumpToggleTicks;
+        private volatile bool _lootState = false;
+        private volatile bool _isLootKeyPressed = false;
+        private volatile bool _inspectState = false;
+        private volatile bool _isInspectKeyPressed = false;
         private long _lastInspectToggleMs = 0;
 
         private readonly object _stackLock = new object();
         private List<int> _horizontalStack = new List<int>();
         private List<int> _verticalStack = new List<int>();
 
-        private bool _wasTapStrafeActive = false;
+        private bool _regularJumpDown;
+        private bool _techniqueJumpDown;
         // Track synthetic holds so every physical release gets a matching KEYUP.
         private readonly HashSet<int> _syntheticActiveVks = new HashSet<int>();
 
         private short _lastLoggedJoyX = 0;
         private short _lastLoggedJoyY = 0;
 
-        private Dictionary<byte, bool> _scanCodeStates = new Dictionary<byte, bool>();
+        private readonly Dictionary<ScanCode, bool> _scanCodeStates = new Dictionary<ScanCode, bool>();
 
         public event Action<bool>? OnToggleChanged;
 
@@ -175,31 +215,46 @@ namespace Rebind.Services
 
         public void ReloadConfig()
         {
-            ClearVirtualInputs();
-            _config = _configManager.LoadConfig();
-
-            _toggleKeyVk = KeyHelper.GetVirtualKeyCode(_config.ToggleShortcut ?? "Insert");
-            _strafeKeyVk = KeyHelper.GetVirtualKeyCode(_config.JoystickYPositive ?? "W");
-            _jumpKeyVk = KeyHelper.GetVirtualKeyCode(_config.LeftBumper ?? "Space");
-            _moveLeftVk = KeyHelper.GetVirtualKeyCode(_config.JoystickXNegative ?? "A");
-            _moveRightVk = KeyHelper.GetVirtualKeyCode(_config.JoystickXPositive ?? "D");
-            _backVk = KeyHelper.GetVirtualKeyCode(_config.JoystickYNegative ?? "S");
-            _tapStrafeTriggerVk = KeyHelper.GetVirtualKeyCode(_config.TapStrafeKey ?? _config.LeftBumper ?? "Space");
-
-            _scanForward  = KeyHelper.GetScanCode(_config.TapStrafeForward  ?? "I", 0x17);
-            _scanBackward = KeyHelper.GetScanCode(_config.TapStrafeBackward ?? "K", 0x25);
-            _scanLeft     = KeyHelper.GetScanCode(_config.TapStrafeLeft     ?? "J", 0x24);
-            _scanRight    = KeyHelper.GetScanCode(_config.TapStrafeRight    ?? "L", 0x26);
-            _scanJump     = KeyHelper.GetScanCode(_config.TapStrafeJump     ?? "Y", 0x15);
-
-            _scanCodeW = KeyHelper.GetScanCode(_config.JoystickYPositive ?? "W", 0x11);
-            _scanCodeS = KeyHelper.GetScanCode(_config.JoystickYNegative ?? "S", 0x1F);
-            _scanCodeA = KeyHelper.GetScanCode(_config.JoystickXNegative ?? "A", 0x1E);
-            _scanCodeD = KeyHelper.GetScanCode(_config.JoystickXPositive ?? "D", 0x20);
-
-            lock (_mappingLock)
+            lock (_lifecycleLock)
             {
-                BuildMappingCache();
+                _isReloading = true;
+                try
+                {
+                    ClearVirtualInputs();
+                    _config = _configManager.LoadConfig();
+
+                    _toggleKeyVk = KeyHelper.GetVirtualKeyCode(_config.ToggleShortcut ?? "Insert");
+                    _strafeKeyVk = KeyHelper.GetVirtualKeyCode(_config.JoystickYPositive ?? "W");
+                    _jumpKeyVk = KeyHelper.GetVirtualKeyCode(_config.LeftBumper ?? "Space");
+                    _moveLeftVk = KeyHelper.GetVirtualKeyCode(_config.JoystickXNegative ?? "A");
+                    _moveRightVk = KeyHelper.GetVirtualKeyCode(_config.JoystickXPositive ?? "D");
+                    _backVk = KeyHelper.GetVirtualKeyCode(_config.JoystickYNegative ?? "S");
+                    _tapStrafeTriggerVk = KeyHelper.GetVirtualKeyCode(_config.TapStrafeKey ?? _config.LeftBumper ?? "Space");
+
+                    _scanForward  = KeyHelper.GetScanCode(_config.TapStrafeForward  ?? "I", new ScanCode(0x17, false));
+                    _scanBackward = KeyHelper.GetScanCode(_config.TapStrafeBackward ?? "K", new ScanCode(0x25, false));
+                    _scanLeft     = KeyHelper.GetScanCode(_config.TapStrafeLeft     ?? "J", new ScanCode(0x24, false));
+                    _scanRight    = KeyHelper.GetScanCode(_config.TapStrafeRight    ?? "L", new ScanCode(0x26, false));
+                    _scanJump     = KeyHelper.GetScanCode(_config.TapStrafeJump     ?? "Y", new ScanCode(0x15, false));
+
+                    _scanCodeW = KeyHelper.GetScanCode(_config.JoystickYPositive ?? "W", new ScanCode(0x11, false));
+                    _scanCodeS = KeyHelper.GetScanCode(_config.JoystickYNegative ?? "S", new ScanCode(0x1F, false));
+                    _scanCodeA = KeyHelper.GetScanCode(_config.JoystickXNegative ?? "A", new ScanCode(0x1E, false));
+                    _scanCodeD = KeyHelper.GetScanCode(_config.JoystickXPositive ?? "D", new ScanCode(0x20, false));
+
+                    lock (_mappingLock)
+                    {
+                        BuildMappingCache();
+                    }
+
+                    // Invalidate any macro iteration that observed the cleared state
+                    // before the newly loaded bindings were installed.
+                    Interlocked.Increment(ref _inputGeneration);
+                }
+                finally
+                {
+                    _isReloading = false;
+                }
             }
         }
 
@@ -208,12 +263,11 @@ namespace Rebind.Services
             if (_config == null) return;
             _keyPressActions.Clear();
 
-            AddMapping(_config.DPadUp, isDown => _vigemService.SetButton(Xbox360Button.Up, isDown));
-            // DPadDown (superglide) is handled directly in HandleKeyEvent for frame-accurate timing.
+            _mantleJumpKeyVk = KeyHelper.GetVirtualKeyCode(_config.DPadUp ?? "X");
             _superglideKeyVk = KeyHelper.GetVirtualKeyCode(_config.DPadDown ?? "V");
-            AddMapping(_config.DPadLeft, isDown => _vigemService.SetButton(Xbox360Button.Left, isDown));
-            AddMapping(_config.DPadRight, isDown => _vigemService.SetButton(Xbox360Button.Right, isDown));
-            AddMapping(_config.Guide, isDown => _vigemService.SetButton(Xbox360Button.Guide, isDown));
+            AddMapping(_config.DPadLeft, isDown => SetControllerButton(Xbox360Button.Left, isDown));
+            AddMapping(_config.DPadRight, isDown => SetControllerButton(Xbox360Button.Right, isDown));
+            AddMapping(_config.Guide, isDown => SetControllerButton(Xbox360Button.Guide, isDown));
             AddMapping(_config.FastLootKey, isDown => _isLootKeyPressed = isDown);
             AddMapping(_config.InspectKey, isDown => _isInspectKeyPressed = isDown);
         }
@@ -231,46 +285,72 @@ namespace Rebind.Services
 
         private bool HandleKeyEvent(int vkCode, bool isDown)
         {
-            if (IsBindingMode) return false;
-
-            if (vkCode == _toggleKeyVk && isDown)
+            bool traceInput = InputTrace.IsCapturing && IsConfiguredInput(vkCode);
+            if (traceInput)
             {
-                KeyLogger.Log($"PHYSICAL: {(isDown ? "DOWN" : "UP")} - VK: {vkCode}");
-                _isEnabled = !_isEnabled;
-                if (!_isEnabled) ClearVirtualInputs();
+                string edge = isDown ? (_physicalKeyDowns.ContainsKey(vkCode) ? "repeat" : "down") : "up";
+                InputTrace.Record("Input", $"{KeyHelper.GetInputName(vkCode)} {edge}");
+            }
 
-                OnToggleChanged?.Invoke(_isEnabled);
+            bool handled = HandlePhysicalKey(vkCode, isDown);
+            if (traceInput && !handled)
+                InputTrace.Record("Routing", "Passed through");
+            return handled;
+        }
+
+        private bool IsConfiguredInput(int vkCode)
+        {
+            if (vkCode == _toggleKeyVk || vkCode == _jumpKeyVk || vkCode == _tapStrafeTriggerVk ||
+                vkCode == _mantleJumpKeyVk || vkCode == _superglideKeyVk || vkCode == _strafeKeyVk ||
+                vkCode == _backVk || vkCode == _moveLeftVk || vkCode == _moveRightVk)
+                return true;
+
+            lock (_mappingLock)
+                return _keyPressActions.ContainsKey(vkCode);
+        }
+
+        private bool HandlePhysicalKey(int vkCode, bool isDown)
+        {
+            if (isDown)
+            {
+                if (_physicalKeyDowns.TryGetValue(vkCode, out long? originalGeneration))
+                    return originalGeneration.HasValue;
+
+                bool handled = HandleMappedKeyEvent(vkCode, true);
+                _physicalKeyDowns[vkCode] = handled ? Interlocked.Read(ref _inputGeneration) : null;
+                return handled;
+            }
+
+            if (!_physicalKeyDowns.Remove(vkCode, out long? generation) || !generation.HasValue)
+                return false;
+
+            if (generation.Value == Interlocked.Read(ref _inputGeneration))
+                HandleMappedKeyEvent(vkCode, false);
+            return true;
+        }
+
+        private bool HandleMappedKeyEvent(int vkCode, bool isDown)
+        {
+            if (IsBindingMode || !IsViGEmConnected || _config == null) return false;
+
+            if (vkCode == _toggleKeyVk)
+            {
+                if (isDown)
+                {
+                    KeyLogger.Log($"PHYSICAL: DOWN - VK: {vkCode}");
+                    _isEnabled = !_isEnabled;
+                    if (!_isEnabled) ClearVirtualInputs();
+                    OnToggleChanged?.Invoke(IsEnabled);
+                }
                 return true;
             }
 
-            if (!_isEnabled || _config == null) return false;
+            if (!_isEnabled) return false;
 
             // Superglide needs crouch and jump separated by one configured frame.
             if (vkCode == _superglideKeyVk)
             {
-                if (isDown)
-                {
-                    KeyLogger.Log($"SUPERGLIDE: Start - FPS={_config.SuperglideFps}");
-                    _vigemService.SetButton(Xbox360Button.Down, true);
-
-                    int fps = Math.Max(30, _config.SuperglideFps);
-                    long frameTicks = Stopwatch.Frequency / fps;
-
-                    Task.Run(() =>
-                    {
-                        long target = _loopTimer.ElapsedTicks + frameTicks;
-                        // Sleep through most of the frame, then spin for the precise edge.
-                        Thread.Sleep((int)(1000.0 / fps * 0.8));
-                        while (_loopTimer.ElapsedTicks < target) { /* spin */ }
-
-                        _vigemService.SetButton(Xbox360Button.Down, false);
-                        SendScanCode(_scanJump, true);
-                        Thread.Sleep(16);
-                        SendScanCode(_scanJump, false);
-                        KeyLogger.Log("SUPERGLIDE: Jump fired");
-                    });
-                }
-                // The task owns the crouch release, so both physical events stay blocked.
+                if (isDown) StartSuperglide(_config.SuperglideFps);
                 return true;
             }
 
@@ -279,19 +359,17 @@ namespace Rebind.Services
                 KeyLogger.Log($"PHYSICAL: {(isDown ? "DOWN" : "UP")} - VK: {vkCode}");
                 UpdateSnapTap(vkCode, isDown);
                 // Pair tap-strafe's synthetic hold with the physical release so the key cannot stick.
-                if (!isDown && _syntheticActiveVks.Contains(vkCode))
+                if (!isDown && RemoveSyntheticActiveKey(vkCode))
                 {
-                    _syntheticActiveVks.Remove(vkCode);
-                    byte sc = (vkCode == _moveLeftVk) ? _scanCodeA : _scanCodeD;
-                    keybd_event(0, sc, KEYEVENTF_SCANCODE | (uint)KEYEVENTF_KEYUP, KeyboardHook.SYNTHETIC_MARKER);
-                    KeyLogger.Log($"SYNTHETIC KEYUP: VK={vkCode} Scan=0x{sc:X2}");
+                    ScanCode scanCode = (vkCode == _moveLeftVk) ? _scanCodeA : _scanCodeD;
+                    SendScanCode(scanCode, false, force: true);
+                    KeyLogger.Log($"SYNTHETIC KEYUP: VK={vkCode} Scan=0x{scanCode.Code:X2}");
                 }
                 return true;
             }
 
-            if (vkCode == _tapStrafeTriggerVk && _tapStrafeTriggerVk != _jumpKeyVk)
+            if (_config.IsStrafeEnabled && vkCode == _tapStrafeTriggerVk && _tapStrafeTriggerVk != _jumpKeyVk)
             {
-                if (isDown && _isTapStrafeTriggerPressed) return true;
                 KeyLogger.Log($"PHYSICAL TAP STRAFE KEY: {(isDown ? "DOWN" : "UP")} - VK: {vkCode}");
                 _isTapStrafeTriggerPressed = isDown;
 
@@ -307,14 +385,7 @@ namespace Rebind.Services
 
             if (vkCode == _jumpKeyVk)
             {
-                // Repeated keydown events would retrigger the tap while the key is held.
-                if (isDown && _isJumpKeyPressed)
-                {
-                    return true;
-                }
-
                 KeyLogger.Log($"PHYSICAL: {(isDown ? "DOWN" : "UP")} - VK: {vkCode}");
-                _isJumpKeyPressed = isDown;
                 if (_tapStrafeTriggerVk == _jumpKeyVk)
                 {
                     _isTapStrafeTriggerPressed = isDown;
@@ -326,39 +397,7 @@ namespace Rebind.Services
                     KeyLogger.Log($"TAP STRAFE TOGGLE MODE: Active={_isStrafeToggledActive}");
                 }
 
-                if (_config.IsJumpSpamEnabled)
-                {
-                    if (!isDown) 
-                    { 
-                        _jumpState = false; 
-                        _vigemService.SetButton(Xbox360Button.LeftShoulder, false); 
-                        if (!IsMacroActive())
-                        {
-                            SendScanCode(SCAN_SPACE, false); 
-                        }
-                    }
-                }
-                else
-                {
-                    if (isDown)
-                    {
-                        _vigemService.SetButton(Xbox360Button.LeftShoulder, true);
-                        SendScanCode(SCAN_SPACE, true);
-
-                        Task.Run(async () =>
-                        {
-                            await Task.Delay(30);
-                            _vigemService.SetButton(Xbox360Button.LeftShoulder, false);
-                            SendScanCode(SCAN_SPACE, false);
-                        });
-                    }
-                    else
-                    {
-                        _vigemService.SetButton(Xbox360Button.LeftShoulder, false);
-                        SendScanCode(SCAN_SPACE, false);
-                    }
-                }
-
+                HandleJump(isDown, _config.IsJumpSpamEnabled);
                 UpdateMovementOutput();
                 return true;
             }
@@ -368,10 +407,9 @@ namespace Rebind.Services
                 KeyLogger.Log($"PHYSICAL: {(isDown ? "DOWN" : "UP")} - VK: {vkCode}");
                 _isStrafeKeyPressed = isDown;
                 UpdateSnapTap(vkCode, isDown);
-                if (!isDown && _syntheticActiveVks.Contains(vkCode))
+                if (!isDown && RemoveSyntheticActiveKey(vkCode))
                 {
-                    _syntheticActiveVks.Remove(vkCode);
-                    keybd_event(0, _scanCodeW, KEYEVENTF_SCANCODE | (uint)KEYEVENTF_KEYUP, KeyboardHook.SYNTHETIC_MARKER);
+                    SendScanCode(_scanCodeW, false, force: true);
                     KeyLogger.Log($"SYNTHETIC KEYUP: W VK={vkCode}");
                 }
                 return true;
@@ -382,12 +420,20 @@ namespace Rebind.Services
                 KeyLogger.Log($"PHYSICAL: {(isDown ? "DOWN" : "UP")} - VK: {vkCode}");
                 _isBackKeyPressed = isDown;
                 UpdateSnapTap(vkCode, isDown);
-                if (!isDown && _syntheticActiveVks.Contains(vkCode))
+                if (!isDown && RemoveSyntheticActiveKey(vkCode))
                 {
-                    _syntheticActiveVks.Remove(vkCode);
-                    keybd_event(0, _scanCodeS, KEYEVENTF_SCANCODE | (uint)KEYEVENTF_KEYUP, KeyboardHook.SYNTHETIC_MARKER);
+                    SendScanCode(_scanCodeS, false, force: true);
                     KeyLogger.Log($"SYNTHETIC KEYUP: S VK={vkCode}");
                 }
+                return true;
+            }
+
+            if (vkCode == _mantleJumpKeyVk)
+            {
+                if (!_config.UseAppMantleJumpTiming)
+                    SetControllerButton(Xbox360Button.Up, isDown);
+                else if (isDown)
+                    StartMantleJump(_config.MantleJumpFps);
                 return true;
             }
 
@@ -406,8 +452,171 @@ namespace Rebind.Services
             return false;
         }
 
+        private void StartSuperglide(int configuredFps)
+        {
+            long generation;
+            long target;
+            lock (_lifecycleLock)
+            {
+                if (_isSuperglideRunning || _isMantleJumpRunning) return;
+                _isSuperglideRunning = true;
+                generation = Interlocked.Read(ref _inputGeneration);
+                SetControllerButton(Xbox360Button.Down, true);
+                target = _loopTimer.ElapsedTicks + Stopwatch.Frequency / Math.Max(30, configuredFps);
+            }
+
+            Task.Run(() =>
+            {
+                if (!RunTechniqueStep(generation, target, () =>
+                {
+                    SetControllerButton(Xbox360Button.Down, false);
+                    SetJumpOutput(true, generation, technique: true);
+                })) return;
+
+                Thread.Sleep(16);
+                RunForGeneration(generation, () =>
+                {
+                    SetJumpOutput(false, generation, technique: true);
+                    _isSuperglideRunning = false;
+                });
+                KeyLogger.Log("SUPERGLIDE: Jump fired");
+            });
+        }
+
+        private void StartMantleJump(int configuredFps)
+        {
+            long generation;
+            long start;
+            long fps = Math.Max(MappingConfig.MinimumMantleJumpFps, configuredFps);
+            long frameTicks = Math.Max(1, Stopwatch.Frequency / fps);
+            // Preserve the Steam layout's 5 ms and 51 ms offsets at the 144 FPS baseline.
+            long cancelOffset = Stopwatch.Frequency * 5 * 144 / (1000 * fps);
+            long interactOffset = Stopwatch.Frequency * 51 * 144 / (1000 * fps);
+            lock (_lifecycleLock)
+            {
+                if (_isSuperglideRunning || _isMantleJumpRunning) return;
+                generation = Interlocked.Read(ref _inputGeneration);
+                if (_lootState)
+                {
+                    SendVirtualKey(VK_E, SCAN_E, false, generation);
+                    _lootState = false;
+                }
+                lock (_scanCodeLock)
+                {
+                    SetTapStrafeDirections(false, false, false, false, generation);
+                    _isMantleJumpRunning = true;
+                    SendScanCode(_scanForward, true, expectedGeneration: generation);
+                    start = _loopTimer.ElapsedTicks;
+                }
+            }
+
+            Task.Run(() =>
+            {
+                if (!RunTechniqueStep(generation, start + cancelOffset, () =>
+                {
+                    SendScanCode(_scanForward, false, expectedGeneration: generation);
+                    SendScanCode(_scanBackward, true, expectedGeneration: generation);
+                })) return;
+
+                if (!RunTechniqueStep(generation, _loopTimer.ElapsedTicks + frameTicks,
+                    () => SendScanCode(_scanBackward, false, expectedGeneration: generation))) return;
+
+                if (!RunTechniqueStep(generation, start + interactOffset, () =>
+                {
+                    SendScanCode(SCAN_E, true, expectedGeneration: generation);
+                    SetJumpOutput(true, generation, technique: true);
+                })) return;
+
+                if (!RunTechniqueStep(generation, _loopTimer.ElapsedTicks + frameTicks, () =>
+                {
+                    SendScanCode(SCAN_E, false, expectedGeneration: generation);
+                    SetJumpOutput(false, generation, technique: true);
+                })) return;
+
+                if (!RunTechniqueStep(generation, _loopTimer.ElapsedTicks + frameTicks,
+                    () => SetJumpOutput(true, generation, technique: true))) return;
+
+                RunTechniqueStep(generation, _loopTimer.ElapsedTicks + frameTicks, () =>
+                {
+                    SetJumpOutput(false, generation, technique: true);
+                    _isMantleJumpRunning = false;
+                });
+            });
+        }
+
+        private bool RunTechniqueStep(long generation, long target, Action action)
+        {
+            // Count from the preceding input so scheduling the worker does not add a full delay.
+            long remainingTicks = target - _loopTimer.ElapsedTicks;
+            if (remainingTicks > 0)
+                Thread.Sleep((int)(800.0 * remainingTicks / Stopwatch.Frequency));
+            while (Interlocked.Read(ref _inputGeneration) == generation && _loopTimer.ElapsedTicks < target)
+                Thread.SpinWait(10);
+
+            return RunForGeneration(generation, action);
+        }
+
+        private void HandleJump(bool isDown, bool spamEnabled)
+        {
+            lock (_lifecycleLock)
+            {
+                _isJumpKeyPressed = isDown;
+                long pressId = ++_jumpPressId;
+                long generation = Interlocked.Read(ref _inputGeneration);
+
+                if (!isDown)
+                {
+                    _jumpState = false;
+                    _nextJumpToggleTicks = 0;
+                    SetJumpOutput(false, generation);
+                }
+                else if (!spamEnabled)
+                {
+                    SetJumpOutput(true, generation);
+                    _ = ReleaseJumpPulseAsync(generation, pressId);
+                }
+            }
+        }
+
+        private async Task ReleaseJumpPulseAsync(long generation, long pressId)
+        {
+            await Task.Delay(30).ConfigureAwait(false);
+            RunForGeneration(generation, () =>
+            {
+                if (pressId == _jumpPressId)
+                    SetJumpOutput(false, generation);
+            });
+        }
+
+        private void SetJumpOutput(bool isDown, long generation, bool technique = false)
+        {
+            lock (_scanCodeLock)
+            {
+                if (_isReloading || generation != Interlocked.Read(ref _inputGeneration)) return;
+
+                // Steam Input turbos Left Bumper. Emit only the configured keyboard Jump.
+                if (technique) _techniqueJumpDown = isDown;
+                else _regularJumpDown = isDown;
+                SendScanCode(_scanJump, _regularJumpDown || _techniqueJumpDown);
+            }
+        }
+
+        private void SetTapStrafeDirections(bool forward, bool backward, bool left, bool right, long generation)
+        {
+            lock (_scanCodeLock)
+            {
+                if (_isMantleJumpRunning) return;
+                SendScanCode(_scanForward, forward, expectedGeneration: generation);
+                SendScanCode(_scanBackward, backward, expectedGeneration: generation);
+                SendScanCode(_scanLeft, left, expectedGeneration: generation);
+                SendScanCode(_scanRight, right, expectedGeneration: generation);
+            }
+        }
+
         private void UpdateSnapTap(int vkCode, bool isDown)
         {
+            string horizontalStack;
+            string verticalStack;
             lock (_stackLock)
             {
                 if (vkCode == _moveLeftVk || vkCode == _moveRightVk)
@@ -420,123 +629,252 @@ namespace Rebind.Services
                     if (isDown) { if (!_verticalStack.Contains(vkCode)) _verticalStack.Add(vkCode); }
                     else { _verticalStack.Remove(vkCode); }
                 }
+
+                horizontalStack = string.Join(",", _horizontalStack);
+                verticalStack = string.Join(",", _verticalStack);
             }
 
-            KeyLogger.Log($"SNAP TAP STACK: hStack=[{string.Join(",", _horizontalStack)}] vStack=[{string.Join(",", _verticalStack)}]");
+            KeyLogger.Log($"SNAP TAP STACK: hStack=[{horizontalStack}] vStack=[{verticalStack}]");
             UpdateMovementOutput();
+        }
+
+        private bool RemoveSyntheticActiveKey(int vkCode)
+        {
+            lock (_stackLock)
+                return _syntheticActiveVks.Remove(vkCode);
         }
 
         private bool IsMacroActive()
         {
             if (_config?.IsStrafeEnabled != true) return false;
 
-            bool isTriggerActive = _config.IsStrafeToggleMode ? _isStrafeToggledActive : _isJumpKeyPressed;
-            return isTriggerActive && (_isStrafeKeyPressed || _isBackKeyPressed || _horizontalStack.Count > 0);
+            bool isTriggerActive = _config.IsStrafeToggleMode ? _isStrafeToggledActive : _isTapStrafeTriggerPressed;
+            bool hasHorizontalInput;
+            lock (_stackLock)
+                hasHorizontalInput = _horizontalStack.Count > 0;
+            return isTriggerActive && (_isStrafeKeyPressed || _isBackKeyPressed || hasHorizontalInput);
         }
 
 
-        private void UpdateMovementOutput(bool forceRefresh = false)
+        private void UpdateMovementOutput(bool forceRefresh = false, long? expectedGeneration = null)
         {
+            bool shouldLog = false;
+            short rawX = 0;
+            short rawY = 0;
+            short joyX = 0;
+            short joyY = 0;
             bool ew = false, es = false, ea = false, ed = false;
 
-            lock (_stackLock)
+            lock (_movementOutputLock)
             {
-                if (_verticalStack.Count > 0)
+                lock (_stackLock)
                 {
-                    int lastY = _verticalStack[_verticalStack.Count - 1];
-                    if (lastY == _strafeKeyVk) ew = true;
-                    else if (lastY == _backVk) es = true;
+                    if (_verticalStack.Count > 0)
+                    {
+                        int lastY = _verticalStack[_verticalStack.Count - 1];
+                        if (lastY == _strafeKeyVk) ew = true;
+                        else if (lastY == _backVk) es = true;
+                    }
+
+                    if (_horizontalStack.Count > 0)
+                    {
+                        int lastX = _horizontalStack[_horizontalStack.Count - 1];
+                        if (lastX == _moveLeftVk) ea = true;
+                        else if (lastX == _moveRightVk) ed = true;
+                    }
                 }
 
-                if (_horizontalStack.Count > 0)
+                rawY = (short)(ew ? 32767 : (es ? -32768 : 0));
+                rawX = (short)(ed ? 32767 : (ea ? -32768 : 0));
+
+                lock (_controllerLock)
                 {
-                    int lastX = _horizontalStack[_horizontalStack.Count - 1];
-                    if (lastX == _moveLeftVk) ea = true;
-                    else if (lastX == _moveRightVk) ed = true;
+                    if (expectedGeneration.HasValue
+                        && (_isReloading || expectedGeneration.Value != Interlocked.Read(ref _inputGeneration)))
+                        return;
+
+                    // Apex can stop reporting a static controller axis after keyboard or mouse input.
+                    // Alternating by one unit keeps XInput movement active.
+                    short dither = (short)((_macroCounter % 2 == 0) ? 0 : 1);
+                    _currentJoyY = rawY == 0 ? (short)0 : (short)(rawY > 0 ? rawY - dither : rawY + dither);
+                    _currentJoyX = rawX == 0 ? (short)0 : (short)(rawX > 0 ? rawX - dither : rawX + dither);
+                    joyX = _currentJoyX;
+                    joyY = _currentJoyY;
+
+                    shouldLog = forceRefresh || rawX != _lastLoggedJoyX || rawY != _lastLoggedJoyY;
+                    if (shouldLog)
+                    {
+                        _lastLoggedJoyX = rawX;
+                        _lastLoggedJoyY = rawY;
+                    }
+
+                    SetMovementAxes(_currentJoyX, _currentJoyY);
                 }
             }
 
-            short rawY = (short)(ew ? 32767 : (es ? -32768 : 0));
-            short rawX = (short)(ed ? 32767 : (ea ? -32768 : 0));
-
-            // Apex can stop reporting a static controller axis after keyboard or mouse input.
-            // Alternating by one unit keeps XInput movement active.
-            short dither = (short)((_macroCounter % 2 == 0) ? 0 : 1);
-            _currentJoyY = rawY == 0 ? (short)0 : (short)(rawY > 0 ? rawY - dither : rawY + dither);
-            _currentJoyX = rawX == 0 ? (short)0 : (short)(rawX > 0 ? rawX - dither : rawX + dither);
-
-            if (forceRefresh || rawX != _lastLoggedJoyX || rawY != _lastLoggedJoyY)
-            {
-                _lastLoggedJoyX = rawX;
-                _lastLoggedJoyY = rawY;
-                KeyLogger.Log($"VIRTUAL INPUTS: JoyX={_currentJoyX} (raw={rawX}), JoyY={_currentJoyY} (raw={rawY}) | WASD=[W:{ew}, A:{ea}, S:{es}, D:{ed}] (forceRefresh={forceRefresh})");
-            }
-
-            _vigemService.SetAxis(Xbox360Axis.LeftThumbX, _currentJoyX);
-            _vigemService.SetAxis(Xbox360Axis.LeftThumbY, _currentJoyY);
+            if (shouldLog)
+                KeyLogger.Log($"VIRTUAL INPUTS: JoyX={joyX} (raw={rawX}), JoyY={joyY} (raw={rawY}) | WASD=[W:{ew}, A:{ea}, S:{es}, D:{ed}] (forceRefresh={forceRefresh})");
         }
 
-        private void SendScanCode(byte scanCode, bool isDown, bool force = false)
+        private void SendScanCode(ScanCode scanCode, bool isDown, bool force = false, long? expectedGeneration = null)
         {
-            if (!force)
+            lock (_scanCodeLock)
             {
-                if (!_scanCodeStates.ContainsKey(scanCode)) _scanCodeStates[scanCode] = false;
-                
-                if (_scanCodeStates[scanCode] == isDown) return;
-            }
-            
-            _scanCodeStates[scanCode] = isDown;
-            KeyLogger.Log($"VIRTUAL KEYBOARD: {(isDown ? "DOWN" : "UP")} - SCAN: 0x{scanCode:X2}");
+                if (expectedGeneration.HasValue
+                    && (_isReloading || expectedGeneration.Value != Interlocked.Read(ref _inputGeneration)))
+                    return;
 
-            uint flag = KEYEVENTF_SCANCODE | (isDown ? 0 : (uint)KEYEVENTF_KEYUP);
-            keybd_event(0, scanCode, flag, KeyboardHook.SYNTHETIC_MARKER);
+                if (!force)
+                {
+                    if (!_scanCodeStates.ContainsKey(scanCode)) _scanCodeStates[scanCode] = false;
+                    if (_scanCodeStates[scanCode] == isDown) return;
+                }
+
+                _scanCodeStates[scanCode] = isDown;
+
+                uint flags = KEYEVENTF_SCANCODE
+                    | (scanCode.IsExtended ? KEYEVENTF_EXTENDEDKEY : 0)
+                    | (isDown ? 0 : (uint)KEYEVENTF_KEYUP);
+                keybd_event(0, scanCode.Code, flags, KeyboardHook.SYNTHETIC_MARKER);
+                if (InputTrace.IsCapturing)
+                    InputTrace.Record("Keyboard", $"{KeyHelper.GetScanCodeName(scanCode)} {(isDown ? "down" : "up")}");
+            }
+
+            KeyLogger.Log($"VIRTUAL KEYBOARD: {(isDown ? "DOWN" : "UP")} - SCAN: 0x{scanCode.Code:X2}{(scanCode.IsExtended ? " (extended)" : string.Empty)}");
+        }
+
+        private void SendVirtualKey(byte virtualKey, ScanCode scanCode, bool isDown, long? expectedGeneration = null)
+        {
+            lock (_lifecycleLock)
+            {
+                if (expectedGeneration.HasValue && expectedGeneration.Value != Interlocked.Read(ref _inputGeneration))
+                    return;
+
+                uint flags = isDown ? 0 : (uint)KEYEVENTF_KEYUP;
+                keybd_event(virtualKey, scanCode.Code, flags, KeyboardHook.SYNTHETIC_MARKER);
+                if (InputTrace.IsCapturing)
+                    InputTrace.Record("Keyboard", $"{KeyHelper.GetInputName(virtualKey)} {(isDown ? "down" : "up")}");
+            }
+        }
+
+        private bool RunForGeneration(long generation, Action action)
+        {
+            lock (_lifecycleLock)
+            {
+                if (generation != Interlocked.Read(ref _inputGeneration) || _isReloading || !IsEnabled || IsBindingMode)
+                    return false;
+
+                action();
+                return true;
+            }
+        }
+
+        private void SetControllerButton(Xbox360Button button, bool isDown)
+        {
+            _vigemService.SetButton(button, isDown);
+            if (InputTrace.IsCapturing)
+                InputTrace.Record("Controller", $"{button} {(isDown ? "down" : "up")}");
+        }
+
+        private void SetMovementAxes(short x, short y)
+        {
+            _vigemService.SetAxis(Xbox360Axis.LeftThumbX, x);
+            _vigemService.SetAxis(Xbox360Axis.LeftThumbY, y);
+            if (InputTrace.IsCapturing)
+                InputTrace.RecordStick(x, y);
         }
 
         private void ClearVirtualInputs()
         {
+            lock (_lifecycleLock)
+            {
+                Interlocked.Increment(ref _inputGeneration);
+                ClearVirtualInputsLocked();
+            }
+        }
+
+        private void ClearVirtualInputsLocked()
+        {
             _isStrafeKeyPressed = false;
             _isBackKeyPressed = false;
             _isJumpKeyPressed = false;
+            _isSuperglideRunning = false;
+            _isMantleJumpRunning = false;
             _isTapStrafeTriggerPressed = false;
             _isStrafeToggledActive = false;
             _isLootKeyPressed = false;
             _jumpState = false;
-            _lootState = false;
-            _horizontalStack.Clear();
-            _verticalStack.Clear();
-            _syntheticActiveVks.Clear();
-
-            _currentJoyX = 0;
-            _currentJoyY = 0;
+            _nextJumpToggleTicks = 0;
+            lock (_stackLock)
+            {
+                _horizontalStack.Clear();
+                _verticalStack.Clear();
+                _syntheticActiveVks.Clear();
+            }
 
             SendScanCode(_scanForward, false);
             SendScanCode(_scanBackward, false);
             SendScanCode(_scanLeft, false);
             SendScanCode(_scanRight, false);
-            SendScanCode(_scanJump, false);
-            SendScanCode(SCAN_SPACE, false);
+            lock (_scanCodeLock)
+            {
+                _regularJumpDown = false;
+                _techniqueJumpDown = false;
+                SendScanCode(_scanJump, false);
+            }
+            SendScanCode(SCAN_E, false);
 
-            _vigemService.SetAxis(Xbox360Axis.LeftThumbX, 0);
-            _vigemService.SetAxis(Xbox360Axis.LeftThumbY, 0);
-            _vigemService.SetButton(Xbox360Button.LeftShoulder, false);
-            _vigemService.SetButton(Xbox360Button.Up, false);
-            _vigemService.SetButton(Xbox360Button.Down, false);
-            _vigemService.SetButton(Xbox360Button.Left, false);
-            _vigemService.SetButton(Xbox360Button.Right, false);
-            _vigemService.SetButton(Xbox360Button.Guide, false);
-            keybd_event(VK_E, SCAN_E, KEYEVENTF_KEYUP, KeyboardHook.SYNTHETIC_MARKER);
-            keybd_event(VK_N, SCAN_N, KEYEVENTF_KEYUP, KeyboardHook.SYNTHETIC_MARKER);
+            lock (_controllerLock)
+            {
+                _currentJoyX = 0;
+                _currentJoyY = 0;
+                SetMovementAxes(0, 0);
+                SetControllerButton(Xbox360Button.Up, false);
+                SetControllerButton(Xbox360Button.Down, false);
+                SetControllerButton(Xbox360Button.Left, false);
+                SetControllerButton(Xbox360Button.Right, false);
+                SetControllerButton(Xbox360Button.Guide, false);
+            }
+            if (_lootState) SendVirtualKey(VK_E, SCAN_E, false);
+            if (_inspectState) SendVirtualKey(VK_N, SCAN_N, false);
+            _lootState = false;
             _inspectState = false;
             _isInspectKeyPressed = false;
         }
 
+        private void UpdateJumpSpam(long generation)
+        {
+            var config = _config;
+            if (config?.IsJumpSpamEnabled != true || !_isJumpKeyPressed) return;
+
+            RunForGeneration(generation, () =>
+            {
+                if (!_isJumpKeyPressed) return;
+
+                int intervalMs = Math.Max(MappingConfig.MinimumAutoJumpIntervalMs, config.AutoJumpIntervalMs);
+                long intervalTicks = Math.Max(1, Stopwatch.Frequency * intervalMs / 2000);
+                long now = _loopTimer.ElapsedTicks;
+                long nextToggle = _nextJumpToggleTicks == 0 ? now : _nextJumpToggleTicks;
+                if (now < nextToggle) return;
+
+                // Preserve the edge cadence even if one worker iteration runs late.
+                long transitionsDue = 1 + (now - nextToggle) / intervalTicks;
+                if ((transitionsDue & 1) != 0) _jumpState = !_jumpState;
+                SetJumpOutput(_jumpState, generation);
+                _nextJumpToggleTicks = nextToggle + transitionsDue * intervalTicks;
+            });
+        }
+
         private void MacroLoop()
         {
+            long tapStrafeGeneration = -1;
             while (_isRunning)
             {
-                if (_isEnabled && _config != null)
+                long iterationGeneration = Interlocked.Read(ref _inputGeneration);
+                if (IsEnabled && !IsBindingMode && !_isReloading && _config != null)
                 {
                     _macroCounter++;
+                    UpdateJumpSpam(iterationGeneration);
 
                     // Refresh held movement every 15 ms because hybrid-input events can stall a static stick report.
                     bool hasMovementKeys;
@@ -547,105 +885,75 @@ namespace Rebind.Services
 
                     if (_macroCounter % 5 == 0 && hasMovementKeys)
                     {
-                        UpdateMovementOutput();
+                        UpdateMovementOutput(expectedGeneration: iterationGeneration);
                     }
 
                     if (IsMacroActive())
                     {
-                        if (!_wasTapStrafeActive)
+                        if (tapStrafeGeneration != iterationGeneration)
                         {
                             // Start with an ON pulse instead of waiting for the previous counter phase.
                             _tapStrafeCounter = 0;
-                            _wasTapStrafeActive = true;
+                            tapStrafeGeneration = iterationGeneration;
                         }
 
                         _tapStrafeCounter++;
 
                         bool holdW, holdS, holdA, holdD;
+                        int verticalCount, horizontalCount;
                         lock (_stackLock)
                         {
                             holdW = _verticalStack.Count > 0 && _verticalStack[_verticalStack.Count - 1] == _strafeKeyVk;
                             holdS = _verticalStack.Count > 0 && _verticalStack[_verticalStack.Count - 1] == _backVk;
                             holdA = _horizontalStack.Count > 0 && _horizontalStack[_horizontalStack.Count - 1] == _moveLeftVk;
                             holdD = _horizontalStack.Count > 0 && _horizontalStack[_horizontalStack.Count - 1] == _moveRightVk;
+                            verticalCount = _verticalStack.Count;
+                            horizontalCount = _horizontalStack.Count;
                         }
 
                         if (_macroCounter % 100 == 0)
-                            KeyLogger.Log($"STRAFE STATE: W={holdW} S={holdS} A={holdA} D={holdD} | vStack={_verticalStack.Count} hStack={_horizontalStack.Count}");
+                            KeyLogger.Log($"STRAFE STATE: W={holdW} S={holdS} A={holdA} D={holdD} | vStack={verticalCount} hStack={horizontalCount}");
 
-                        // The 9 ms on / 6 ms off pulse produces a 67 Hz lurch rate.
+                        // Pulse only directions. Auto Jump owns repeats of the jump key.
                         bool tapOn = (_tapStrafeCounter % 5 < 3);
-
-                        if (tapOn)
-                        {
-                            SendScanCode(_scanJump, true);
-
-                            // Forward takes priority when opposing lurch directions overlap.
-                            bool sendI = holdW;
-                            bool sendK = holdS && !holdW;
-                            bool sendJ = holdA && !holdW && !holdS;
-                            bool sendL = holdD && !holdW && !holdS;
-
-                            SendScanCode(_scanForward, sendI);
-                            SendScanCode(_scanBackward, sendK);
-                            SendScanCode(_scanLeft, sendJ);
-                            SendScanCode(_scanRight, sendL);
-                        }
-                        else
-                        {
-                            SendScanCode(_scanJump, false);
-
-                            SendScanCode(_scanForward, false);
-                            SendScanCode(_scanBackward, false);
-                            SendScanCode(_scanLeft, false);
-                            SendScanCode(_scanRight, false);
-                        }
+                        SetTapStrafeDirections(tapOn && holdW, tapOn && holdS, tapOn && holdA, tapOn && holdD,
+                            iterationGeneration);
                     }
                     else
                     {
-                        if (_wasTapStrafeActive)
+                        if (tapStrafeGeneration == iterationGeneration)
                         {
-                            _wasTapStrafeActive = false;
-                            SendScanCode(_scanJump, false, force: true);
-                            SendScanCode(_scanForward, false, force: true);
-                            SendScanCode(_scanBackward, false, force: true);
-                            SendScanCode(_scanLeft, false, force: true);
-                            SendScanCode(_scanRight, false, force: true);
+                            tapStrafeGeneration = -1;
+                            SetTapStrafeDirections(false, false, false, false, iterationGeneration);
 
                             // End synthetic holds before restoring controller movement.
                             lock (_stackLock)
                             {
                                 foreach (int vk in _syntheticActiveVks)
                                 {
-                                    byte sc;
-                                    if (vk == _moveLeftVk) sc = _scanCodeA;
-                                    else if (vk == _moveRightVk) sc = _scanCodeD;
-                                    else if (vk == _strafeKeyVk) sc = _scanCodeW;
-                                    else sc = _scanCodeS;
-                                    keybd_event(0, sc, KEYEVENTF_SCANCODE | (uint)KEYEVENTF_KEYUP, KeyboardHook.SYNTHETIC_MARKER);
+                                    ScanCode scanCode;
+                                    if (vk == _moveLeftVk) scanCode = _scanCodeA;
+                                    else if (vk == _moveRightVk) scanCode = _scanCodeD;
+                                    else if (vk == _strafeKeyVk) scanCode = _scanCodeW;
+                                    else scanCode = _scanCodeS;
+                                    SendScanCode(scanCode, false, force: true, expectedGeneration: iterationGeneration);
                                 }
                                 _syntheticActiveVks.Clear();
                             }
 
                             // Briefly clear the stick to avoid restoring a stale mixed-input state.
-                            _vigemService.SetAxis(Xbox360Axis.LeftThumbX, 0);
-                            _vigemService.SetAxis(Xbox360Axis.LeftThumbY, 0);
+                            RunForGeneration(iterationGeneration, () =>
+                            {
+                                lock (_controllerLock)
+                                {
+                                    SetMovementAxes(0, 0);
+                                }
+                            });
                             Thread.Sleep(10);
-                            UpdateMovementOutput(forceRefresh: true);
+                            UpdateMovementOutput(forceRefresh: true, expectedGeneration: iterationGeneration);
 
                             KeyLogger.Log("TAP STRAFE ENDED: All lurch keys released.");
                         }
-
-                        if (_macroCounter % 5 == 0)
-                        {
-                            if (_config.IsJumpSpamEnabled && _isJumpKeyPressed)
-                            {
-                                _jumpState = !_jumpState;
-                                _vigemService.SetButton(Xbox360Button.LeftShoulder, _jumpState);
-                                SendScanCode(SCAN_SPACE, _jumpState);
-                            }
-                        }
-
 
                     }
 
@@ -654,14 +962,20 @@ namespace Rebind.Services
                     {
                         if (_isLootKeyPressed)
                         {
-                            _lootState = !_lootState;
-                            if (_lootState) keybd_event(VK_E, SCAN_E, 0, KeyboardHook.SYNTHETIC_MARKER);
-                            else keybd_event(VK_E, SCAN_E, KEYEVENTF_KEYUP, KeyboardHook.SYNTHETIC_MARKER);
+                            RunForGeneration(iterationGeneration, () =>
+                            {
+                                if (_isMantleJumpRunning) return;
+                                _lootState = !_lootState;
+                                SendVirtualKey(VK_E, SCAN_E, _lootState, iterationGeneration);
+                            });
                         }
                         else if (_lootState)
                         {
-                            _lootState = false;
-                            keybd_event(VK_E, SCAN_E, KEYEVENTF_KEYUP, KeyboardHook.SYNTHETIC_MARKER);
+                            RunForGeneration(iterationGeneration, () =>
+                            {
+                                _lootState = false;
+                                SendVirtualKey(VK_E, SCAN_E, false, iterationGeneration);
+                            });
                         }
 
                     }
@@ -672,16 +986,21 @@ namespace Rebind.Services
                         int delayMs = Math.Max(5, _config.InspectDelayMs);
                         if (currentMs - _lastInspectToggleMs >= delayMs)
                         {
-                            _lastInspectToggleMs = currentMs;
-                            _inspectState = !_inspectState;
-                            if (_inspectState) keybd_event(VK_N, SCAN_N, 0, KeyboardHook.SYNTHETIC_MARKER);
-                            else keybd_event(VK_N, SCAN_N, KEYEVENTF_KEYUP, KeyboardHook.SYNTHETIC_MARKER);
+                            RunForGeneration(iterationGeneration, () =>
+                            {
+                                _lastInspectToggleMs = currentMs;
+                                _inspectState = !_inspectState;
+                                SendVirtualKey(VK_N, SCAN_N, _inspectState, iterationGeneration);
+                            });
                         }
                     }
                     else if (_inspectState)
                     {
-                        _inspectState = false;
-                        keybd_event(VK_N, SCAN_N, KEYEVENTF_KEYUP, KeyboardHook.SYNTHETIC_MARKER);
+                        RunForGeneration(iterationGeneration, () =>
+                        {
+                            _inspectState = false;
+                            SendVirtualKey(VK_N, SCAN_N, false, iterationGeneration);
+                        });
                     }
                 }
 
@@ -706,10 +1025,10 @@ namespace Rebind.Services
         {
             _keyboardHook.KeyEvent -= HandleKeyEvent;
             _mouseHook.KeyEvent -= HandleKeyEvent;
-            ClearVirtualInputs();
             _isRunning = false;
+            _macroThread.Join();
+            ClearVirtualInputs();
             timeEndPeriod(1);
-            _macroThread.Join(500);
             if (_hrTimer != IntPtr.Zero && _hrTimer != new IntPtr(-1))
                 CloseHandle(_hrTimer);
             _keyboardHook.Dispose();

@@ -1,4 +1,5 @@
 using System;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 
@@ -21,6 +22,9 @@ namespace Rebind.Services
         private LowLevelMouseProc _proc;
         private IntPtr _hookID = IntPtr.Zero;
 
+        public bool IsInstalled => _hookID != IntPtr.Zero;
+        public string? ErrorMessage { get; private set; }
+
         public MouseHook()
         {
             _proc = HookCallback;
@@ -32,8 +36,16 @@ namespace Rebind.Services
             using (Process curProcess = Process.GetCurrentProcess())
             using (ProcessModule? curModule = curProcess.MainModule)
             {
-                if (curModule?.ModuleName == null) return IntPtr.Zero;
-                return SetWindowsHookEx(WH_MOUSE_LL, proc, GetModuleHandle(curModule.ModuleName), 0);
+                if (curModule?.ModuleName == null)
+                {
+                    ErrorMessage = "Could not determine the current process module.";
+                    return IntPtr.Zero;
+                }
+
+                IntPtr hook = SetWindowsHookEx(WH_MOUSE_LL, proc, GetModuleHandle(curModule.ModuleName), 0);
+                if (hook == IntPtr.Zero)
+                    ErrorMessage = new Win32Exception(Marshal.GetLastWin32Error()).Message;
+                return hook;
             }
         }
 
