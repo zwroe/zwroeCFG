@@ -1,4 +1,4 @@
-# zwroe CFG
+# zwroe CFG 
 
 A MnK-to-Controller movement remapper for Apex Legends. 
 
